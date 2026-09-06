@@ -23,7 +23,7 @@ import {
 } from "react-icons/fa";
 import { MdOutlineChevronRight } from "react-icons/md";
 import styles from "./WorkerPortal.module.css";
-import { format, isToday, isTomorrow, isPast, parseISO } from "date-fns";
+import { format, isToday, isTomorrow, parseISO } from "date-fns";
 
 const WorkerPortal = () => {
   const { user, role, loading: authLoading } = useAuth();
@@ -169,32 +169,57 @@ const WorkerPortal = () => {
         .from("builders")
         .select("*");
 
-      const formattedTasks = tasks.map((task) => {
-        const builder = buildersData?.find(
-          (b) => b.id === task.addresses?.builder_id,
-        );
-        const builderNotes =
-          builder?.notes ||
-          builder?.instructions ||
-          builder?.description ||
-          null;
+      const formattedTasks = tasks
+        .map((task) => {
+          const builder = buildersData?.find(
+            (b) => b.id === task.addresses?.builder_id,
+          );
+          const builderNotes =
+            builder?.notes ||
+            builder?.instructions ||
+            builder?.description ||
+            null;
 
-        const taskDate = task.date || task.addresses?.date;
+          const taskDate = task.date || task.addresses?.date;
 
-        return {
-          id: task.id,
-          address_id: task.addresses?.id,
-          address: task.addresses?.address,
-          date: taskDate,
-          work_order_number: task.addresses?.work_order_number,
-          task_name: task.work_type_templates?.name || "Невідома робота",
-          payment_amount: task.payment_amount,
-          notes: task.notes,
-          builder_name: builder?.name || "Невідомий білдер",
-          builder_instructions: builderNotes,
-          ai_translation: task.addresses?.ai_translation,
-          status: task.addresses?.status || "Assigned",
-        };
+          return {
+            id: task.id,
+            address_id: task.addresses?.id,
+            address: task.addresses?.address,
+            date: taskDate,
+            work_order_number: task.addresses?.work_order_number,
+            task_name: task.work_type_templates?.name || "Невідома робота",
+            payment_amount: task.payment_amount,
+            notes: task.notes,
+            builder_name: builder?.name || "Невідомий білдер",
+            builder_instructions: builderNotes,
+            ai_translation: task.addresses?.ai_translation,
+            status: task.addresses?.status || "Assigned",
+          };
+        })
+        .filter((task) => {
+          // === ЖОРСТКИЙ ФІЛЬТР: ТІЛЬКИ ВІД СЬОГОДНІ ===
+          if (!task.date) return false; // Приховуємо роботи без дати взагалі
+
+          // Безпечний парсинг дати без зсуву часових поясів (YYYY-MM-DD)
+          const parts = task.date.split("-");
+          if (parts.length !== 3) return false;
+
+          const taskDate = new Date(parts[0], parts[1] - 1, parts[2]);
+          taskDate.setHours(0, 0, 0, 0);
+
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+
+          // Повертаємо лише ті, що заплановані на сьогодні або в майбутньому
+          // (Старі завдання більше ніколи не з'являться ні в активних, ні в завершених)
+          return taskDate.getTime() >= today.getTime();
+        });
+
+      formattedTasks.sort((a, b) => {
+        if (!a.date) return 1;
+        if (!b.date) return -1;
+        return new Date(a.date) - new Date(b.date);
       });
 
       setMyTasks(formattedTasks);
@@ -262,7 +287,7 @@ const WorkerPortal = () => {
       setSelectedTask(matchedTask);
     } else {
       setSelectedTask(null);
-      toast.error("Завдання не знайдено (можливо, воно видалене)");
+      toast.error("Завдання не знайдено (можливо, воно старе і приховане)");
     }
   };
 
@@ -393,7 +418,6 @@ const WorkerPortal = () => {
 
   const groupedTasks = useMemo(() => {
     const groups = {};
-    const isCompleted = workFilter === "completed";
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -401,41 +425,28 @@ const WorkerPortal = () => {
     tomorrow.setDate(tomorrow.getDate() + 1);
 
     filteredTasks.forEach((task) => {
-      let groupKey = "no_date";
-      let groupTitle = "📌 Без дати";
-      let category = 5;
-      let dateValue = 0;
+      if (!task.date) return; // Відсіяні ще вище, але для безпеки
 
-      if (task.date) {
-        const taskDate = parseISO(task.date);
-        const tDate = new Date(taskDate);
-        tDate.setHours(0, 0, 0, 0);
-        dateValue = tDate.getTime();
+      const taskDate = parseISO(task.date);
+      const tDate = new Date(taskDate);
+      tDate.setHours(0, 0, 0, 0);
+      const dateValue = tDate.getTime();
 
-        if (dateValue === today.getTime()) {
-          groupKey = "today";
-          groupTitle = `🔥 Сьогодні (${format(taskDate, "dd MMM")})`;
-          category = 1;
-        } else if (dateValue === tomorrow.getTime()) {
-          groupKey = "tomorrow";
-          groupTitle = `📅 Завтра (${format(taskDate, "dd MMM")})`;
-          category = 2;
-        } else if (dateValue < today.getTime()) {
-          if (isCompleted) {
-            groupKey = format(taskDate, "yyyy-MM");
-            groupTitle = `✅ Виконано: ${format(taskDate, "MMMM yyyy")}`;
-            category = 4;
-          } else {
-            // Збираємо всі минулі в одну групу
-            groupKey = "past";
-            groupTitle = `⚠️ Минулі / Протерміновані`;
-            category = 4;
-          }
-        } else {
-          groupKey = task.date;
-          groupTitle = `⏳ Майбутні: ${format(taskDate, "dd MMM yyyy")}`;
-          category = 3;
-        }
+      let groupKey, groupTitle, category;
+
+      // Оскільки минулих вже немає, у нас є тільки 3 варіанти: Сьогодні, Завтра, Майбутні
+      if (dateValue === today.getTime()) {
+        groupKey = "today";
+        groupTitle = `🔥 Сьогодні (${format(taskDate, "dd MMM")})`;
+        category = 1;
+      } else if (dateValue === tomorrow.getTime()) {
+        groupKey = "tomorrow";
+        groupTitle = `📅 Завтра (${format(taskDate, "dd MMM")})`;
+        category = 2;
+      } else {
+        groupKey = task.date;
+        groupTitle = `⏳ Майбутні: ${format(taskDate, "dd MMM yyyy")}`;
+        category = 3;
       }
 
       if (!groups[groupKey]) {
@@ -450,28 +461,20 @@ const WorkerPortal = () => {
     });
 
     Object.values(groups).forEach((group) => {
-      if (group.category === 4) {
-        group.tasks.sort(
-          (a, b) =>
-            new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime(),
-        );
-      } else {
-        group.tasks.sort(
-          (a, b) =>
-            new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime(),
-        );
-      }
+      // Сортуємо хронологічно
+      group.tasks.sort(
+        (a, b) =>
+          new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime(),
+      );
     });
 
     return Object.entries(groups)
       .map(([key, value]) => ({ key, ...value }))
       .sort((a, b) => {
         if (a.category !== b.category) return a.category - b.category;
-        if (a.category === 3) return a.dateValue - b.dateValue;
-        if (a.category === 4) return b.dateValue - a.dateValue;
-        return 0;
+        return a.dateValue - b.dateValue;
       });
-  }, [filteredTasks, workFilter]);
+  }, [filteredTasks]);
 
   const activeCount = myTasks.filter((t) => t.status !== "Ready").length;
   const completedCount = myTasks.filter((t) => t.status === "Ready").length;
@@ -514,70 +517,6 @@ const WorkerPortal = () => {
       <MdOutlineChevronRight className={styles.chevronIcon} />
     </div>
   );
-
-  // ФУНКЦІЯ: Відображає внутрішні групи по місяцях для протермінованих завдань
-  const renderPastSubGroups = (tasks) => {
-    const subGroups = {};
-    tasks.forEach((task) => {
-      const taskDate = task.date ? parseISO(task.date) : new Date(0);
-      const monthKey = format(taskDate, "yyyy-MM");
-      const monthTitle = format(taskDate, "MMMM yyyy"); // напр. August 2026
-
-      if (!subGroups[monthKey]) {
-        subGroups[monthKey] = { title: monthTitle, tasks: [] };
-      }
-      subGroups[monthKey].tasks.push(task);
-    });
-
-    const sortedKeys = Object.keys(subGroups).sort((a, b) =>
-      b.localeCompare(a),
-    );
-
-    return (
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "12px",
-          width: "100%",
-        }}
-      >
-        {sortedKeys.map((key) => {
-          const sg = subGroups[key];
-          const isSubExpanded =
-            expandedGroups[`sub-${key}`] !== undefined
-              ? expandedGroups[`sub-${key}`]
-              : false; // Закриті за замовчуванням
-
-          return (
-            <div key={key} className={styles.subGroup}>
-              <div
-                className={styles.subGroupHeader}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleGroup(`sub-${key}`, false);
-                }}
-              >
-                <span>
-                  📅 {sg.title} ({sg.tasks.length})
-                </span>
-                {isSubExpanded ? (
-                  <FaChevronDown className={styles.accordionIcon} />
-                ) : (
-                  <FaChevronRight className={styles.accordionIcon} />
-                )}
-              </div>
-              {isSubExpanded && (
-                <div className={styles.subGroupContent}>
-                  {sg.tasks.map((t) => renderTaskCard(t))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
 
   if (authLoading || !role)
     return (
@@ -669,11 +608,9 @@ const WorkerPortal = () => {
                             </div>
                             {isExpanded && (
                               <div className={styles.groupAccordionContent}>
-                                {group.key === "past" && workFilter === "active"
-                                  ? renderPastSubGroups(group.tasks)
-                                  : group.tasks.map((task) =>
-                                      renderTaskCard(task),
-                                    )}
+                                {group.tasks.map((task) =>
+                                  renderTaskCard(task),
+                                )}
                               </div>
                             )}
                           </div>
