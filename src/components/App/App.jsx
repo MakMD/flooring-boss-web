@@ -41,7 +41,6 @@ const AddressDetailsPage = lazy(() => import("../../Pages/AddressDetailsPage"));
 const AdminPage = lazy(() => import("../../Pages/AdminPage"));
 const CalendarPage = lazy(() => import("../../Pages/CalendarPage"));
 const WorkerPortal = lazy(() => import("../../Pages/WorkerPortal"));
-// НОВИЙ ІМПОРТ ДЛЯ БІЛДЕРІВ
 const BuildersListPage = lazy(() => import("../../Pages/BuildersListPage"));
 
 // Розумний редирект для головної сторінки
@@ -94,6 +93,15 @@ const router = createBrowserRouter(
           path: "worker-portal",
           element: <WorkerPortal />,
         },
+        // НОВИЙ МАРШРУТ ДЛЯ АДМІНА: РЕЖИМ ПЕРЕГЛЯДУ ПРАЦІВНИКА
+        {
+          path: "worker-view/:personId",
+          element: (
+            <AdminRoute>
+              <WorkerPortal />
+            </AdminRoute>
+          ),
+        },
         // МАРШРУТИ ДЛЯ АДМІНІСТРАТОРІВ
         {
           path: "addresses",
@@ -127,7 +135,6 @@ const router = createBrowserRouter(
             </AdminRoute>
           ),
         },
-        // НОВИЙ МАРШРУТ ДЛЯ БІЛДЕРІВ
         {
           path: "builders",
           element: (

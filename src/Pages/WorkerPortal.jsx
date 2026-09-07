@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "../supabaseClient";
 import { useAuth } from "../contexts/AuthContext";
-import { Navigate } from "react-router-dom";
+import { Navigate, useParams, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import PhotoUploader from "../components/PhotoUploader/PhotoUploader";
 import {
@@ -23,22 +23,29 @@ import {
 } from "react-icons/fa";
 import { MdOutlineChevronRight } from "react-icons/md";
 import styles from "./WorkerPortal.module.css";
-import { format, isToday, isTomorrow, parseISO } from "date-fns";
+import { format, parseISO } from "date-fns";
 
 const WorkerPortal = () => {
   const { user, role, loading: authLoading } = useAuth();
-  const userId = user?.id;
+  const { personId: adminViewPersonId } = useParams();
+  const navigate = useNavigate();
+
+  // === ПЕРЕВІРКА РЕЖИМУ АДМІНА ===
+  const isAdminView = role === "admin" && !!adminViewPersonId;
+
+  // Динамічні ідентифікатори (або авторизований працівник, або працівник, якого переглядає адмін)
+  const [targetPersonId, setTargetPersonId] = useState(null);
+  const [targetAuthId, setTargetAuthId] = useState(null);
+  const [targetName, setTargetName] = useState("");
+  const [isTargetResolved, setIsTargetResolved] = useState(false);
 
   const [activeTab, setActiveTab] = useState("work");
   const [loading, setLoading] = useState(false);
-  const [isInitialized, setIsInitialized] = useState(false);
 
   const [myTasks, setMyTasks] = useState([]);
   const [selectedTask, setSelectedTask] = useState(null);
-
   const [searchTerm, setSearchTerm] = useState("");
   const [workFilter, setWorkFilter] = useState("active");
-
   const [expandedGroups, setExpandedGroups] = useState({});
 
   const [notifications, setNotifications] = useState([]);
@@ -56,23 +63,67 @@ const WorkerPortal = () => {
     last_name: "",
     status: "pending",
   });
-
   const [documents, setDocuments] = useState([]);
 
+  // 1. РОЗПІЗНАВАННЯ КОРИСТУВАЧА (АДМІН ЧИ ПРАЦІВНИК)
+  useEffect(() => {
+    const resolveTarget = async () => {
+      if (!role) return;
+
+      if (isAdminView) {
+        // Адмін переглядає чужий кабінет
+        const { data, error } = await supabase
+          .from("people")
+          .select("id, user_id, name")
+          .eq("id", adminViewPersonId)
+          .single();
+
+        if (!error && data) {
+          setTargetPersonId(data.id);
+          setTargetAuthId(data.user_id);
+          setTargetName(data.name);
+        } else {
+          toast.error("Працівника не знайдено в базі");
+        }
+      } else if (role === "worker") {
+        // Звичайний вхід працівника
+        if (!user?.id) return;
+        const { data, error } = await supabase
+          .from("people")
+          .select("id, name, user_id")
+          .eq("user_id", user.id);
+
+        if (!error && data && data.length > 0) {
+          const validPerson =
+            data.find((p) => p.name && !p.name.includes("Працівник")) ||
+            data[0];
+          setTargetPersonId(validPerson.id);
+          setTargetAuthId(user.id);
+          setTargetName(validPerson.name);
+        } else {
+          setTargetAuthId(user.id);
+        }
+      }
+      setIsTargetResolved(true);
+    };
+
+    resolveTarget();
+  }, [role, isAdminView, adminViewPersonId, user]);
+
   const ensureProfileExists = useCallback(async () => {
-    if (!userId) return;
+    if (!targetAuthId) return;
     try {
       let { data, error } = await supabase
         .from("profiles")
         .select("*")
-        .eq("id", userId)
+        .eq("id", targetAuthId)
         .maybeSingle();
 
       if (error) throw error;
 
-      if (!data) {
+      if (!data && role === "worker") {
         const newProfile = {
-          id: userId,
+          id: targetAuthId,
           first_name: "Працівник",
           last_name: "",
           role: "worker",
@@ -83,63 +134,39 @@ const WorkerPortal = () => {
         if (insertError) throw insertError;
         data = newProfile;
       }
-      setProfile(data);
+      if (data) setProfile(data);
     } catch (error) {
-      console.error("Помилка ініціалізації профілю:", error.message);
-      toast.error("Не вдалося завантажити дані профілю.");
-    } finally {
-      setIsInitialized(true);
+      console.error("Помилка профілю:", error.message);
     }
-  }, [userId]);
-
-  useEffect(() => {
-    if (userId && role === "worker" && !isInitialized) {
-      ensureProfileExists();
-    }
-  }, [userId, role, isInitialized, ensureProfileExists]);
+  }, [targetAuthId, role]);
 
   const fetchNotifications = useCallback(async () => {
-    if (!userId) return;
+    if (!targetAuthId) return;
     const { data, error } = await supabase
       .from("notifications")
       .select("*")
-      .eq("user_id", userId)
+      .eq("user_id", targetAuthId)
       .order("created_at", { ascending: false });
 
     if (!error && data) {
       setNotifications(data);
       setUnreadCount(data.filter((n) => !n.is_read).length);
     }
-  }, [userId]);
+  }, [targetAuthId]);
 
   const fetchMyTasks = useCallback(async () => {
-    if (!userId) return;
+    if (!targetPersonId) {
+      setMyTasks([]);
+      return;
+    }
     setLoading(true);
     try {
-      const { data: personRecords, error: personError } = await supabase
-        .from("people")
-        .select("id, name")
-        .eq("user_id", userId);
-
-      if (personError) throw personError;
-
-      if (!personRecords || personRecords.length === 0) {
-        setMyTasks([]);
-        return;
-      }
-
-      const validPerson =
-        personRecords.find((p) => p.name && !p.name.includes("Працівник")) ||
-        personRecords[0];
-      const workerId = validPerson.id;
-
       const { data: tasks, error: tasksError } = await supabase
         .from("work_types")
         .select(
           `
           id,
           person_id,
-          payment_amount,
           notes,
           date,
           work_type_templates (name),
@@ -149,17 +176,15 @@ const WorkerPortal = () => {
             date,
             status,
             is_deleted,
-            ai_translation,
             work_order_number,
             builder_id
           )
         `,
         )
-        .eq("person_id", workerId)
+        .eq("person_id", targetPersonId)
         .eq("addresses.is_deleted", false);
 
       if (tasksError) throw tasksError;
-
       if (!tasks || tasks.length === 0) {
         setMyTasks([]);
         return;
@@ -179,7 +204,6 @@ const WorkerPortal = () => {
             builder?.instructions ||
             builder?.description ||
             null;
-
           const taskDate = task.date || task.addresses?.date;
 
           return {
@@ -189,19 +213,14 @@ const WorkerPortal = () => {
             date: taskDate,
             work_order_number: task.addresses?.work_order_number,
             task_name: task.work_type_templates?.name || "Невідома робота",
-            payment_amount: task.payment_amount,
             notes: task.notes,
             builder_name: builder?.name || "Невідомий білдер",
             builder_instructions: builderNotes,
-            ai_translation: task.addresses?.ai_translation,
             status: task.addresses?.status || "Assigned",
           };
         })
         .filter((task) => {
-          // === ЖОРСТКИЙ ФІЛЬТР: ТІЛЬКИ ВІД СЬОГОДНІ ===
-          if (!task.date) return false; // Приховуємо роботи без дати взагалі
-
-          // Безпечний парсинг дати без зсуву часових поясів (YYYY-MM-DD)
+          if (!task.date) return false;
           const parts = task.date.split("-");
           if (parts.length !== 3) return false;
 
@@ -211,8 +230,6 @@ const WorkerPortal = () => {
           const today = new Date();
           today.setHours(0, 0, 0, 0);
 
-          // Повертаємо лише ті, що заплановані на сьогодні або в майбутньому
-          // (Старі завдання більше ніколи не з'являться ні в активних, ні в завершених)
           return taskDate.getTime() >= today.getTime();
         });
 
@@ -229,29 +246,36 @@ const WorkerPortal = () => {
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [targetPersonId]);
 
   const fetchWorkerDocuments = useCallback(async () => {
-    if (!userId) return;
+    if (!targetAuthId) return;
     try {
       const { data, error } = await supabase
         .from("worker_documents")
         .select("*")
-        .eq("worker_id", userId);
+        .eq("worker_id", targetAuthId);
       if (error) throw error;
       setDocuments(data || []);
     } catch (error) {
       console.error("Помилка завантаження документів:", error.message);
     }
-  }, [userId]);
+  }, [targetAuthId]);
 
   useEffect(() => {
-    if (isInitialized) {
+    if (isTargetResolved) {
+      ensureProfileExists();
       fetchNotifications();
       fetchMyTasks();
       fetchWorkerDocuments();
     }
-  }, [isInitialized, fetchNotifications, fetchMyTasks, fetchWorkerDocuments]);
+  }, [
+    isTargetResolved,
+    ensureProfileExists,
+    fetchNotifications,
+    fetchMyTasks,
+    fetchWorkerDocuments,
+  ]);
 
   const markNotificationAsRead = async (id) => {
     await supabase.from("notifications").update({ is_read: true }).eq("id", id);
@@ -259,10 +283,11 @@ const WorkerPortal = () => {
   };
 
   const markAllAsRead = async () => {
+    if (!targetAuthId) return;
     await supabase
       .from("notifications")
       .update({ is_read: true })
-      .eq("user_id", userId);
+      .eq("user_id", targetAuthId);
     fetchNotifications();
     toast.success("Всі сповіщення прочитані");
   };
@@ -271,7 +296,6 @@ const WorkerPortal = () => {
     if (!notification.is_read) {
       markNotificationAsRead(notification.id);
     }
-
     const cleanMsg = (notification.message || "").toLowerCase().trim();
     const cleanTitle = (notification.title || "").toLowerCase().trim();
 
@@ -292,10 +316,13 @@ const WorkerPortal = () => {
   };
 
   const handleDocumentUploadComplete = async (urls) => {
-    if (!urls || urls.length === 0) return;
+    if (!urls || urls.length === 0 || !targetAuthId) return;
     try {
       setLoading(true);
-      const newDocs = urls.map((url) => ({ worker_id: userId, file_url: url }));
+      const newDocs = urls.map((url) => ({
+        worker_id: targetAuthId,
+        file_url: url,
+      }));
       const { error } = await supabase.from("worker_documents").insert(newDocs);
       if (error) throw error;
       toast.success("Документи успішно завантажено!");
@@ -318,6 +345,13 @@ const WorkerPortal = () => {
   const handleWorkSubmit = async (e) => {
     e.preventDefault();
     if (!selectedTask) return;
+    if (!targetAuthId) {
+      toast.error(
+        "У цього працівника ще немає акаунта (user_id). Неможливо відправити звіт.",
+      );
+      return;
+    }
+
     setLoading(true);
     try {
       const finalNotes = `[Завдання: ${selectedTask.task_name}]\n[Статус від працівника: ${formData.workerStatus}]\n${formData.notes ? formData.notes : "Без додаткових коментарів."}`;
@@ -326,7 +360,7 @@ const WorkerPortal = () => {
         .from("daily_reports")
         .insert([
           {
-            worker_id: userId,
+            worker_id: targetAuthId,
             address_id: selectedTask.address_id,
             work_type_id: selectedTask.id,
             notes: finalNotes,
@@ -338,19 +372,10 @@ const WorkerPortal = () => {
 
       if (reportError) throw reportError;
 
-      const { error: updateWorkTypeError } = await supabase
+      await supabase
         .from("work_types")
-        .update({
-          notes: formData.notes ? formData.notes : selectedTask.notes,
-        })
+        .update({ notes: formData.notes ? formData.notes : selectedTask.notes })
         .eq("id", selectedTask.id);
-
-      if (updateWorkTypeError) {
-        console.error(
-          "Помилка оновлення work_types:",
-          updateWorkTypeError.message,
-        );
-      }
 
       toast.success("Звіт успішно надіслано на перевірку!");
       setSelectedTask(null);
@@ -366,24 +391,6 @@ const WorkerPortal = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const extractRelevantInstruction = (fullText, taskName) => {
-    if (!fullText) return null;
-    let textToParse = fullText;
-    const managerNoteToken = "⚠️ Примітки від менеджера:";
-    if (fullText.includes(managerNoteToken)) {
-      const idx = fullText.indexOf(managerNoteToken);
-      textToParse = fullText.substring(0, idx);
-    }
-    const blocks = textToParse.split("📍 Зона:").filter(Boolean);
-    for (const block of blocks) {
-      const cleanBlock = ("📍 Зона:" + block).trim();
-      if (cleanBlock.toLowerCase().includes(taskName.toLowerCase())) {
-        return cleanBlock;
-      }
-    }
-    return textToParse.trim();
   };
 
   const getPageTitle = () => {
@@ -418,14 +425,13 @@ const WorkerPortal = () => {
 
   const groupedTasks = useMemo(() => {
     const groups = {};
-
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
     filteredTasks.forEach((task) => {
-      if (!task.date) return; // Відсіяні ще вище, але для безпеки
+      if (!task.date) return;
 
       const taskDate = parseISO(task.date);
       const tDate = new Date(taskDate);
@@ -434,7 +440,6 @@ const WorkerPortal = () => {
 
       let groupKey, groupTitle, category;
 
-      // Оскільки минулих вже немає, у нас є тільки 3 варіанти: Сьогодні, Завтра, Майбутні
       if (dateValue === today.getTime()) {
         groupKey = "today";
         groupTitle = `🔥 Сьогодні (${format(taskDate, "dd MMM")})`;
@@ -461,7 +466,6 @@ const WorkerPortal = () => {
     });
 
     Object.values(groups).forEach((group) => {
-      // Сортуємо хронологічно
       group.tasks.sort(
         (a, b) =>
           new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime(),
@@ -522,8 +526,9 @@ const WorkerPortal = () => {
     return (
       <div className={styles.loadingScreen}>Отримання прав доступу...</div>
     );
-  if (role === "admin") return <Navigate to="/addresses" replace />;
-  if (!isInitialized)
+  if (role === "admin" && !isAdminView)
+    return <Navigate to="/addresses" replace />;
+  if (!isTargetResolved)
     return (
       <div className={styles.loadingScreen}>Завантаження даних кабінету...</div>
     );
@@ -531,6 +536,38 @@ const WorkerPortal = () => {
   return (
     <div className={styles.portalWrapper}>
       <div className={styles.portalContainer}>
+        {/* === ПЛАШКА РЕЖИМУ АДМІНА === */}
+        {isAdminView && (
+          <div
+            style={{
+              backgroundColor: "#b02a48",
+              color: "white",
+              padding: "10px 20px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              fontWeight: "600",
+              fontSize: "0.95rem",
+            }}
+          >
+            <span>👀 Режим імітації: {targetName}</span>
+            <button
+              onClick={() => navigate(-1)}
+              style={{
+                background: "rgba(255,255,255,0.2)",
+                border: "none",
+                color: "white",
+                padding: "6px 12px",
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontWeight: "bold",
+              }}
+            >
+              Вийти
+            </button>
+          </div>
+        )}
+
         <div className={styles.topHeader}>
           <h1 className={styles.pageTitle}>{getPageTitle()}</h1>
         </div>
@@ -705,38 +742,6 @@ const WorkerPortal = () => {
                     </div>
                   )}
 
-                  {selectedTask.ai_translation && (
-                    <div
-                      className={styles.instructionBlock}
-                      style={{
-                        backgroundColor: "#fef3c7",
-                        borderColor: "#fde68a",
-                      }}
-                    >
-                      <div
-                        className={styles.instructionHeader}
-                        style={{ color: "#d97706" }}
-                      >
-                        <FaInfoCircle className={styles.instructionIcon} />
-                        <h3>Інструкція з ворк-ордера:</h3>
-                      </div>
-                      <div
-                        style={{
-                          padding: "10px",
-                          backgroundColor: "#fff",
-                          borderRadius: "8px",
-                          border: "1px solid #fde68a",
-                          whiteSpace: "pre-wrap",
-                        }}
-                      >
-                        {extractRelevantInstruction(
-                          selectedTask.ai_translation,
-                          selectedTask.task_name,
-                        )}
-                      </div>
-                    </div>
-                  )}
-
                   <div className={styles.instructionBlock}>
                     <div className={styles.instructionHeader}>
                       <FaWrench className={styles.instructionIcon} />
@@ -744,7 +749,7 @@ const WorkerPortal = () => {
                     </div>
                     <div
                       style={{
-                        padding: "10px",
+                        padding: "16px",
                         backgroundColor: "#fff",
                         borderRadius: "8px",
                         border: "1px solid var(--color-border)",
@@ -753,37 +758,46 @@ const WorkerPortal = () => {
                       <div
                         style={{
                           fontWeight: "bold",
-                          fontSize: "1.1rem",
+                          fontSize: "1.2rem",
                           color: "var(--color-primary)",
                         }}
                       >
                         {selectedTask.task_name}
                       </div>
-                      <div
-                        style={{
-                          fontSize: "0.95rem",
-                          color: "#555",
-                          marginTop: "8px",
-                        }}
-                      >
-                        Оплата за це завдання: $
-                        {parseFloat(selectedTask.payment_amount || 0).toFixed(
-                          2,
-                        )}
-                      </div>
+
                       {selectedTask.notes && (
                         <div
                           style={{
-                            marginTop: "12px",
-                            padding: "10px",
-                            backgroundColor: "rgba(176, 42, 72, 0.05)",
-                            borderRadius: "6px",
-                            fontSize: "0.9rem",
-                            color: "#444",
+                            marginTop: "16px",
+                            padding: "12px",
+                            backgroundColor: "#fff9fa",
+                            borderLeft: "4px solid #b02a48",
+                            borderRadius: "0 6px 6px 0",
+                            fontSize: "0.95rem",
+                            color: "#333",
+                            boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
                           }}
                         >
-                          <strong>📝 Примітка до завдання:</strong>{" "}
-                          {selectedTask.notes}
+                          <div
+                            style={{
+                              color: "#b02a48",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              fontWeight: "bold",
+                              marginBottom: "4px",
+                            }}
+                          >
+                            <FaInfoCircle /> Нотатка від менеджера:
+                          </div>
+                          <div
+                            style={{
+                              whiteSpace: "pre-wrap",
+                              lineHeight: "1.5",
+                            }}
+                          >
+                            {selectedTask.notes}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -865,7 +879,7 @@ const WorkerPortal = () => {
             <div className={styles.profileTab}>
               <div className={styles.profileInfo}>
                 <p>
-                  <strong>Ім'я:</strong> {profile.first_name}{" "}
+                  <strong>Ім'я:</strong> {profile.first_name || targetName}{" "}
                   {profile.last_name}
                 </p>
                 <p>

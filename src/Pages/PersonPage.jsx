@@ -1,3 +1,4 @@
+// src/Pages/PersonPage.jsx
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
@@ -8,12 +9,13 @@ import {
   FaCheck,
   FaFolder,
   FaUserCog,
+  FaEye,
 } from "react-icons/fa";
 import { MdOutlineChevronRight } from "react-icons/md";
 import { supabase } from "../supabaseClient";
 import SkeletonLoader from "../components/SkeletonLoader/SkeletonLoader";
 import EmptyState from "../components/EmptyState/EmptyState";
-import WorkerProfileModal from "../components/WorkerProfileModal/WorkerProfileModal"; // НОВИЙ ІМПОРТ
+import WorkerProfileModal from "../components/WorkerProfileModal/WorkerProfileModal";
 import styles from "./PersonPage.module.css";
 import commonStyles from "../styles/common.module.css";
 import toast from "react-hot-toast";
@@ -36,9 +38,7 @@ const PersonPage = () => {
   const [person, setPerson] = useState(null);
   const [tables, setTables] = useState([]);
 
-  // Стейт для модалки профілю
   const [showProfile, setShowProfile] = useState(false);
-
   const [newTableName, setNewTableName] = useState("");
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -134,7 +134,17 @@ const PersonPage = () => {
           <h1 className={styles.pageTitle}>
             {person ? `${person.name}'s Tables` : "Loading..."}
           </h1>
-          <div style={{ display: "flex", gap: "8px" }}>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            {/* НОВА КНОПКА РЕЖИМУ ПЕРЕГЛЯДУ */}
+            <button
+              className={commonStyles.buttonSecondary}
+              onClick={() => navigate(`/worker-view/${person.id}`)}
+              disabled={!person}
+              title="Переглянути кабінет від імені цього працівника"
+            >
+              <FaEye /> Кабінет
+            </button>
+
             <button
               className={commonStyles.buttonSecondary}
               onClick={() => setShowProfile(true)}
@@ -218,7 +228,6 @@ const PersonPage = () => {
         </div>
       </div>
 
-      {/* НОВЕ МОДАЛЬНЕ ВІКНО ПРОФІЛЮ */}
       {showProfile && person && (
         <WorkerProfileModal
           personId={person.id}
