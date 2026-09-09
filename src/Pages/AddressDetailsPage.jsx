@@ -1,3 +1,4 @@
+// src/Pages/AddressDetailsPage.jsx
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
@@ -16,6 +17,8 @@ import {
   FaInfoCircle,
   FaChevronDown,
   FaChevronUp,
+  FaChevronLeft,
+  FaChevronRight,
 } from "react-icons/fa";
 import styles from "./AddressDetailsPage.module.css";
 import commonStyles from "../styles/common.module.css";
@@ -44,6 +47,7 @@ const FileListItem = ({
   fileIdentifier,
   onDelete,
   onImageClick,
+  allImages,
 }) => {
   const [signedUrl, setSignedUrl] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -86,7 +90,9 @@ const FileListItem = ({
     }
     if (isImage(signedUrl) || isImage(fileIdentifier)) {
       e.preventDefault();
-      onImageClick(signedUrl || fileIdentifier);
+      // Передаємо масив всіх картинок і поточний signedUrl
+      const currentIndex = allImages.findIndex((img) => img === fileIdentifier);
+      onImageClick(allImages, currentIndex !== -1 ? currentIndex : 0);
     }
   };
 
@@ -132,11 +138,15 @@ const AddressDetailsPage = () => {
     builder_id: "",
     store_id: "",
     ai_translation: "",
+    work_order_number: "",
   });
 
   const [reports, setReports] = useState([]);
   const [expandedReports, setExpandedReports] = useState({});
-  const [selectedImage, setSelectedImage] = useState(null);
+
+  // === СТЕЙТИ ДЛЯ ГАЛЕРЕЇ (LIGHTBOX) ===
+  const [lightboxImages, setLightboxImages] = useState([]);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
   const [zoomScale, setZoomScale] = useState(1);
   const [imgPosition, setImgPosition] = useState({ x: 0, y: 0 });
@@ -158,7 +168,7 @@ const AddressDetailsPage = () => {
         .single(),
       supabase
         .from("daily_reports")
-        .select(`*, work_types (work_type_templates (name))`)
+        .select(`*, work_types (id, status, work_type_templates (name))`)
         .eq("address_id", addressId)
         .order("created_at", { ascending: false }),
     ]);
@@ -179,6 +189,7 @@ const AddressDetailsPage = () => {
       builder_id: addrRes.data.builder_id || "",
       store_id: addrRes.data.store_id || "",
       ai_translation: addrRes.data.ai_translation || "",
+      work_order_number: addrRes.data.work_order_number || "",
     });
 
     if (reportsRes.error) {
@@ -189,16 +200,31 @@ const AddressDetailsPage = () => {
       ];
 
       if (workerIds.length > 0) {
-        const { data: profilesData } = await supabase
-          .from("profiles")
-          .select("id, first_name, last_name")
-          .in("id", workerIds);
+        // === БЕРЕМО РЕАЛЬНІ ІМЕНА З ТАБЛИЦІ PEOPLE ===
+        const { data: peopleData } = await supabase
+          .from("people")
+          .select("id, user_id, name")
+          .in("user_id", workerIds);
 
         const reportsWithProfiles = reportsRes.data.map((report) => {
-          const profile = profilesData?.find((p) => p.id === report.worker_id);
+          const person = peopleData?.find(
+            (p) =>
+              p.user_id === report.worker_id && !p.name.includes("Працівник"),
+          );
+          const fallbackPerson = peopleData?.find(
+            (p) => p.user_id === report.worker_id,
+          );
+
           return {
             ...report,
-            profiles: profile || null,
+            profiles: {
+              first_name: person
+                ? person.name
+                : fallbackPerson
+                  ? fallbackPerson.name
+                  : "Невідомий працівник",
+              last_name: "",
+            },
           };
         });
 
@@ -220,6 +246,36 @@ const AddressDetailsPage = () => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // === ФУНКЦІЇ LIGHTBOX ===
+  const openLightbox = (imagesArray, startIndex = 0) => {
+    setLightboxImages(imagesArray);
+    setCurrentImageIndex(startIndex);
+    setZoomScale(1);
+    setImgPosition({ x: 0, y: 0 });
+  };
+
+  const closeLightbox = () => {
+    setLightboxImages([]);
+    setZoomScale(1);
+    setImgPosition({ x: 0, y: 0 });
+  };
+
+  const showNextImage = (e) => {
+    e.stopPropagation();
+    setCurrentImageIndex((prev) => (prev + 1) % lightboxImages.length);
+    setZoomScale(1);
+    setImgPosition({ x: 0, y: 0 });
+  };
+
+  const showPrevImage = (e) => {
+    e.stopPropagation();
+    setCurrentImageIndex(
+      (prev) => (prev - 1 + lightboxImages.length) % lightboxImages.length,
+    );
+    setZoomScale(1);
+    setImgPosition({ x: 0, y: 0 });
+  };
 
   const handleWheel = (e) => {
     e.preventDefault();
@@ -253,11 +309,6 @@ const AddressDetailsPage = () => {
   };
 
   const handleMouseUp = () => setIsDragging(false);
-  const closeLightbox = () => {
-    setSelectedImage(null);
-    setZoomScale(1);
-    setImgPosition({ x: 0, y: 0 });
-  };
 
   const toggleReportExpansion = (reportId) => {
     setExpandedReports((prev) => ({
@@ -308,6 +359,7 @@ const AddressDetailsPage = () => {
       builder_id: editedData.builder_id || null,
       store_id: editedData.store_id || null,
       ai_translation: editedData.ai_translation,
+      work_order_number: editedData.work_order_number || null,
     };
     const updated = await updateAddress(updates);
     if (updated) {
@@ -366,11 +418,29 @@ const AddressDetailsPage = () => {
     if (updated) toast.success("File deleted successfully!");
   };
 
-  const handleApproveReport = async (e) => {
+  // === АПРУВ КОНКРЕТНОЇ РОБОТИ ===
+  const handleApproveReport = async (e, report) => {
     e.stopPropagation();
-    setEditedData((prev) => ({ ...prev, status: "Ready" }));
-    const updated = await updateAddress({ status: "Ready" });
-    if (updated) toast.success("Project marked as Ready based on report!");
+
+    if (!report.work_type_id) {
+      toast.error("Помилка: не знайдено ID завдання для цього звіту.");
+      return;
+    }
+
+    try {
+      // Оновлюємо статус лише для work_types
+      const { error: updateError } = await supabase
+        .from("work_types")
+        .update({ status: "Ready" })
+        .eq("id", report.work_type_id);
+
+      if (updateError) throw updateError;
+
+      toast.success("Роботу підтверджено!");
+      fetchData(); // Оновлюємо дані, щоб бейджі змінилися
+    } catch (error) {
+      toast.error("Помилка підтвердження: " + error.message);
+    }
   };
 
   if (!addressData) return <p>Loading...</p>;
@@ -391,7 +461,8 @@ const AddressDetailsPage = () => {
   return (
     <div className={styles.pageContainer}>
       <div className={styles.mobileLayout}>
-        {selectedImage && (
+        {/* === LIGHTBOX === */}
+        {lightboxImages.length > 0 && (
           <div
             className={styles.lightbox}
             onClick={closeLightbox}
@@ -400,8 +471,15 @@ const AddressDetailsPage = () => {
             <button className={styles.closeLightbox} onClick={closeLightbox}>
               <FaTimes />
             </button>
+
+            {lightboxImages.length > 1 && (
+              <button className={styles.navBtnLeft} onClick={showPrevImage}>
+                <FaChevronLeft />
+              </button>
+            )}
+
             <img
-              src={selectedImage}
+              src={lightboxImages[currentImageIndex]}
               alt="Fullscreen view"
               style={{
                 transform: `scale(${zoomScale}) translate(${imgPosition.x / zoomScale}px, ${imgPosition.y / zoomScale}px)`,
@@ -412,6 +490,18 @@ const AddressDetailsPage = () => {
               onMouseLeave={handleMouseUp}
               onClick={(e) => e.stopPropagation()}
             />
+
+            {lightboxImages.length > 1 && (
+              <button className={styles.navBtnRight} onClick={showNextImage}>
+                <FaChevronRight />
+              </button>
+            )}
+
+            {lightboxImages.length > 1 && (
+              <div className={styles.counter}>
+                {currentImageIndex + 1} / {lightboxImages.length}
+              </div>
+            )}
           </div>
         )}
 
@@ -444,7 +534,6 @@ const AddressDetailsPage = () => {
           </button>
         </div>
 
-        {/* Двоколонкова сітка для верхньої частини (Деталі, Звіти, Файли) */}
         <div className={styles.detailsGrid}>
           {/* ЛІВА КОЛОНКА */}
           <div className={styles.gridColumn}>
@@ -474,6 +563,22 @@ const AddressDetailsPage = () => {
                       <option value="Not Finished">Not Finished</option>
                     </select>
                   </div>
+                </div>
+
+                <div className={styles.detailItem}>
+                  <label>Work Order #</label>
+                  {isEditing ? (
+                    <input
+                      type="text"
+                      name="work_order_number"
+                      value={editedData.work_order_number}
+                      onChange={handleInputChange}
+                      className={styles.editInput}
+                      placeholder="e.g. WO-12345"
+                    />
+                  ) : (
+                    <p>{addressData.work_order_number || "N/A"}</p>
+                  )}
                 </div>
 
                 <div className={styles.detailItem}>
@@ -604,7 +709,14 @@ const AddressDetailsPage = () => {
                                 src={url}
                                 alt={`Scanned Document ${idx + 1}`}
                                 className={styles.originalPhoto}
-                                onClick={() => setSelectedImage(url)}
+                                onClick={() =>
+                                  openLightbox(
+                                    uniqueOriginals.filter(isImage),
+                                    uniqueOriginals
+                                      .filter(isImage)
+                                      .indexOf(url),
+                                  )
+                                }
                               />
                             ) : (
                               <a
@@ -792,7 +904,7 @@ const AddressDetailsPage = () => {
                             </div>
 
                             <div onClick={(e) => e.stopPropagation()}>
-                              {editedData.status === "Ready" ? (
+                              {report.work_types?.status === "Ready" ? (
                                 <span
                                   style={{
                                     color: "#10b981",
@@ -812,8 +924,10 @@ const AddressDetailsPage = () => {
                                     padding: "6px 12px",
                                     fontSize: "0.85rem",
                                   }}
-                                  onClick={handleApproveReport}
-                                  title="Approve report and mark project as Ready"
+                                  onClick={(e) =>
+                                    handleApproveReport(e, report)
+                                  }
+                                  title="Approve this specific work"
                                 >
                                   <FaCheckCircle /> Approve
                                 </button>
@@ -856,7 +970,9 @@ const AddressDetailsPage = () => {
                                         src={url}
                                         alt="Before"
                                         className={styles.thumbnail}
-                                        onClick={() => setSelectedImage(url)}
+                                        onClick={() =>
+                                          openLightbox(report.photos_before, i)
+                                        }
                                       />
                                     ))}
                                   </div>
@@ -875,7 +991,9 @@ const AddressDetailsPage = () => {
                                         src={url}
                                         alt="After"
                                         className={styles.thumbnail}
-                                        onClick={() => setSelectedImage(url)}
+                                        onClick={() =>
+                                          openLightbox(report.photos_after, i)
+                                        }
                                       />
                                     ))}
                                   </div>
@@ -948,7 +1066,8 @@ const AddressDetailsPage = () => {
                         bucketName={BUCKET_NAME}
                         fileIdentifier={id}
                         onDelete={handleFileDelete}
-                        onImageClick={(url) => setSelectedImage(url)}
+                        onImageClick={openLightbox}
+                        allImages={standardFiles.filter(isImage)}
                       />
                     ))}
                   </ul>

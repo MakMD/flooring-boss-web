@@ -5,6 +5,8 @@ import { useAuth } from "../contexts/AuthContext";
 import { Navigate, useParams, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import PhotoUploader from "../components/PhotoUploader/PhotoUploader";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 import {
   FaClipboardList,
   FaUser,
@@ -14,26 +16,33 @@ import {
   FaSearch,
   FaCheckDouble,
   FaCopy,
-  FaChevronDown,
-  FaChevronRight,
   FaWrench,
   FaInfoCircle,
   FaBuilding,
   FaCalendarAlt,
+  FaRegCalendarAlt,
+  FaSave,
+  FaFileAlt,
+  FaChevronLeft,
+  FaChevronRight,
 } from "react-icons/fa";
 import { MdOutlineChevronRight } from "react-icons/md";
 import styles from "./WorkerPortal.module.css";
-import { format, parseISO } from "date-fns";
+import {
+  format,
+  parseISO,
+  differenceInHours,
+  addDays,
+  subDays,
+} from "date-fns";
 
 const WorkerPortal = () => {
   const { user, role, loading: authLoading } = useAuth();
   const { personId: adminViewPersonId } = useParams();
   const navigate = useNavigate();
 
-  // === ПЕРЕВІРКА РЕЖИМУ АДМІНА ===
   const isAdminView = role === "admin" && !!adminViewPersonId;
 
-  // Динамічні ідентифікатори (або авторизований працівник, або працівник, якого переглядає адмін)
   const [targetPersonId, setTargetPersonId] = useState(null);
   const [targetAuthId, setTargetAuthId] = useState(null);
   const [targetName, setTargetName] = useState("");
@@ -46,7 +55,7 @@ const WorkerPortal = () => {
   const [selectedTask, setSelectedTask] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [workFilter, setWorkFilter] = useState("active");
-  const [expandedGroups, setExpandedGroups] = useState({});
+  const [calendarDate, setCalendarDate] = useState(new Date());
 
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -58,6 +67,8 @@ const WorkerPortal = () => {
     photosAfter: [],
   });
 
+  const [adminNote, setAdminNote] = useState("");
+
   const [profile, setProfile] = useState({
     first_name: "",
     last_name: "",
@@ -65,13 +76,17 @@ const WorkerPortal = () => {
   });
   const [documents, setDocuments] = useState([]);
 
-  // 1. РОЗПІЗНАВАННЯ КОРИСТУВАЧА (АДМІН ЧИ ПРАЦІВНИК)
+  const canEditReport = (reportDate) => {
+    if (!reportDate) return false;
+    const hoursDiff = differenceInHours(new Date(), parseISO(reportDate));
+    return hoursDiff < 5;
+  };
+
   useEffect(() => {
     const resolveTarget = async () => {
       if (!role) return;
 
       if (isAdminView) {
-        // Адмін переглядає чужий кабінет
         const { data, error } = await supabase
           .from("people")
           .select("id, user_id, name")
@@ -86,7 +101,6 @@ const WorkerPortal = () => {
           toast.error("Працівника не знайдено в базі");
         }
       } else if (role === "worker") {
-        // Звичайний вхід працівника
         if (!user?.id) return;
         const { data, error } = await supabase
           .from("people")
@@ -140,20 +154,6 @@ const WorkerPortal = () => {
     }
   }, [targetAuthId, role]);
 
-  const fetchNotifications = useCallback(async () => {
-    if (!targetAuthId) return;
-    const { data, error } = await supabase
-      .from("notifications")
-      .select("*")
-      .eq("user_id", targetAuthId)
-      .order("created_at", { ascending: false });
-
-    if (!error && data) {
-      setNotifications(data);
-      setUnreadCount(data.filter((n) => !n.is_read).length);
-    }
-  }, [targetAuthId]);
-
   const fetchMyTasks = useCallback(async () => {
     if (!targetPersonId) {
       setMyTasks([]);
@@ -169,15 +169,21 @@ const WorkerPortal = () => {
           person_id,
           notes,
           date,
+          status,
           work_type_templates (name),
           addresses!inner (
             id,
             address,
             date,
-            status,
             is_deleted,
-            work_order_number,
             builder_id
+          ),
+          daily_reports (
+            id,
+            report_date,
+            notes,
+            photos_before,
+            photos_after
           )
         `,
         )
@@ -206,21 +212,29 @@ const WorkerPortal = () => {
             null;
           const taskDate = task.date || task.addresses?.date;
 
+          const latestReport =
+            task.daily_reports && task.daily_reports.length > 0
+              ? task.daily_reports.sort(
+                  (a, b) => new Date(b.report_date) - new Date(a.report_date),
+                )[0]
+              : null;
+
           return {
             id: task.id,
             address_id: task.addresses?.id,
             address: task.addresses?.address,
             date: taskDate,
-            work_order_number: task.addresses?.work_order_number,
             task_name: task.work_type_templates?.name || "Невідома робота",
             notes: task.notes,
             builder_name: builder?.name || "Невідомий білдер",
             builder_instructions: builderNotes,
-            status: task.addresses?.status || "Assigned",
+            status: task.status || "Assigned",
+            latestReport: latestReport,
           };
         })
         .filter((task) => {
           if (!task.date) return false;
+
           const parts = task.date.split("-");
           if (parts.length !== 3) return false;
 
@@ -248,6 +262,39 @@ const WorkerPortal = () => {
     }
   }, [targetPersonId]);
 
+  const fetchNotifications = useCallback(async () => {
+    if (!targetAuthId) return;
+
+    // ТЯГНЕМО ЛИШЕ НЕПРОЧИТАНІ (НОВІ) СПОВІЩЕННЯ
+    const { data, error } = await supabase
+      .from("notifications")
+      .select("*")
+      .eq("user_id", targetAuthId)
+      .eq("is_read", false)
+      .order("created_at", { ascending: false });
+
+    if (!error && data) {
+      const activeAddresses = myTasks.map((t) =>
+        t.address.toLowerCase().trim(),
+      );
+
+      const validNotifications = data.filter((n) => {
+        const cleanMsg = (n.message || "").toLowerCase().trim();
+        const cleanTitle = (n.title || "").toLowerCase().trim();
+
+        if (!cleanMsg.includes("адресі") && !cleanTitle.includes("адресі"))
+          return true;
+
+        return activeAddresses.some(
+          (addr) => cleanMsg.includes(addr) || cleanTitle.includes(addr),
+        );
+      });
+
+      setNotifications(validNotifications);
+      setUnreadCount(validNotifications.length);
+    }
+  }, [targetAuthId, myTasks]);
+
   const fetchWorkerDocuments = useCallback(async () => {
     if (!targetAuthId) return;
     try {
@@ -265,21 +312,47 @@ const WorkerPortal = () => {
   useEffect(() => {
     if (isTargetResolved) {
       ensureProfileExists();
-      fetchNotifications();
       fetchMyTasks();
       fetchWorkerDocuments();
     }
   }, [
     isTargetResolved,
     ensureProfileExists,
-    fetchNotifications,
     fetchMyTasks,
     fetchWorkerDocuments,
   ]);
 
-  const markNotificationAsRead = async (id) => {
-    await supabase.from("notifications").update({ is_read: true }).eq("id", id);
-    fetchNotifications();
+  useEffect(() => {
+    if (isTargetResolved && !loading) {
+      fetchNotifications();
+    }
+  }, [isTargetResolved, loading, fetchNotifications]);
+
+  // ФУНКЦІЯ: АВТОМАТИЧНЕ ПРИХОВУВАННЯ СПОВІЩЕНЬ ДЛЯ ВІДКРИТОЇ РОБОТИ
+  const markTaskNotificationsAsRead = async (task) => {
+    if (!task || notifications.length === 0) return;
+
+    const cleanAddr = (task.address || "").toLowerCase().trim();
+
+    const unreadIds = notifications
+      .filter((n) => {
+        const cleanMsg = (n.message || "").toLowerCase().trim();
+        const cleanTitle = (n.title || "").toLowerCase().trim();
+        return cleanMsg.includes(cleanAddr) || cleanTitle.includes(cleanAddr);
+      })
+      .map((n) => n.id);
+
+    if (unreadIds.length > 0) {
+      // Видаляємо візуально миттєво
+      setNotifications((prev) => prev.filter((n) => !unreadIds.includes(n.id)));
+      setUnreadCount((prev) => prev - unreadIds.length);
+
+      // Відмічаємо в базі
+      await supabase
+        .from("notifications")
+        .update({ is_read: true })
+        .in("id", unreadIds);
+    }
   };
 
   const markAllAsRead = async () => {
@@ -288,14 +361,20 @@ const WorkerPortal = () => {
       .from("notifications")
       .update({ is_read: true })
       .eq("user_id", targetAuthId);
-    fetchNotifications();
+    setNotifications([]);
+    setUnreadCount(0);
     toast.success("Всі сповіщення прочитані");
   };
 
-  const handleNotificationClick = (notification) => {
-    if (!notification.is_read) {
-      markNotificationAsRead(notification.id);
-    }
+  const handleNotificationClick = async (notification) => {
+    // Прибираємо зі списку відразу
+    setNotifications((prev) => prev.filter((n) => n.id !== notification.id));
+    setUnreadCount((prev) => prev - 1);
+    await supabase
+      .from("notifications")
+      .update({ is_read: true })
+      .eq("id", notification.id);
+
     const cleanMsg = (notification.message || "").toLowerCase().trim();
     const cleanTitle = (notification.title || "").toLowerCase().trim();
 
@@ -308,10 +387,37 @@ const WorkerPortal = () => {
     setActiveTab("work");
 
     if (matchedTask) {
+      const taskDateObj = parseISO(matchedTask.date);
+      setCalendarDate(taskDateObj);
       setSelectedTask(matchedTask);
+      setAdminNote(matchedTask.notes || "");
+
+      if (
+        matchedTask.latestReport &&
+        canEditReport(matchedTask.latestReport.report_date)
+      ) {
+        setFormData({
+          workerStatus: matchedTask.status || "Ready",
+          notes: matchedTask.latestReport.notes
+            .replace(/\[Завдання: .*?\]\n?/, "")
+            .replace(/\[Статус від працівника: .*?\]\n?/, ""),
+          photosBefore: matchedTask.latestReport.photos_before || [],
+          photosAfter: matchedTask.latestReport.photos_after || [],
+        });
+      } else {
+        setFormData({
+          workerStatus: matchedTask.status || "In Process",
+          notes: "",
+          photosBefore: [],
+          photosAfter: [],
+        });
+      }
+
+      // Чистимо інші можливі сповіщення для цієї ж адреси
+      markTaskNotificationsAsRead(matchedTask);
     } else {
       setSelectedTask(null);
-      toast.error("Завдання не знайдено (можливо, воно старе і приховане)");
+      toast.error("Завдання не знайдено (можливо, воно видалене)");
     }
   };
 
@@ -346,38 +452,69 @@ const WorkerPortal = () => {
     e.preventDefault();
     if (!selectedTask) return;
     if (!targetAuthId) {
-      toast.error(
-        "У цього працівника ще немає акаунта (user_id). Неможливо відправити звіт.",
-      );
+      toast.error("Помилка: не знайдено ID працівника.");
       return;
     }
 
     setLoading(true);
     try {
-      const finalNotes = `[Завдання: ${selectedTask.task_name}]\n[Статус від працівника: ${formData.workerStatus}]\n${formData.notes ? formData.notes : "Без додаткових коментарів."}`;
-
-      const { error: reportError } = await supabase
-        .from("daily_reports")
-        .insert([
-          {
-            worker_id: targetAuthId,
-            address_id: selectedTask.address_id,
-            work_type_id: selectedTask.id,
-            notes: finalNotes,
-            photos_before: formData.photosBefore,
-            photos_after: formData.photosAfter,
-            report_date: new Date().toISOString(),
-          },
-        ]);
-
-      if (reportError) throw reportError;
-
-      await supabase
+      const { error: updateWorkTypeError } = await supabase
         .from("work_types")
-        .update({ notes: formData.notes ? formData.notes : selectedTask.notes })
+        .update({
+          status: formData.workerStatus,
+        })
         .eq("id", selectedTask.id);
 
-      toast.success("Звіт успішно надіслано на перевірку!");
+      if (updateWorkTypeError) throw updateWorkTypeError;
+
+      if (
+        formData.notes ||
+        formData.photosBefore.length > 0 ||
+        formData.photosAfter.length > 0
+      ) {
+        let reportNotes = formData.notes;
+        if (!reportNotes.includes("[Завдання:")) {
+          reportNotes = `[Завдання: ${selectedTask.task_name}]\n[Статус від працівника: ${formData.workerStatus}]\n${formData.notes || "Оновлено статус."}`;
+        } else {
+          reportNotes = reportNotes.replace(
+            /\[Статус від працівника: .*?\]/,
+            `[Статус від працівника: ${formData.workerStatus}]`,
+          );
+        }
+
+        if (
+          selectedTask.latestReport &&
+          canEditReport(selectedTask.latestReport.report_date)
+        ) {
+          const { error: reportError } = await supabase
+            .from("daily_reports")
+            .update({
+              notes: reportNotes,
+              photos_before: formData.photosBefore,
+              photos_after: formData.photosAfter,
+              report_date: new Date().toISOString(),
+            })
+            .eq("id", selectedTask.latestReport.id);
+          if (reportError) throw reportError;
+        } else {
+          const { error: reportError } = await supabase
+            .from("daily_reports")
+            .insert([
+              {
+                worker_id: targetAuthId,
+                address_id: selectedTask.address_id,
+                work_type_id: selectedTask.id,
+                notes: reportNotes,
+                photos_before: formData.photosBefore,
+                photos_after: formData.photosAfter,
+                report_date: new Date().toISOString(),
+              },
+            ]);
+          if (reportError) throw reportError;
+        }
+      }
+
+      toast.success("Збережено!");
       setSelectedTask(null);
       setFormData({
         workerStatus: "Ready",
@@ -387,9 +524,25 @@ const WorkerPortal = () => {
       });
       fetchMyTasks();
     } catch (error) {
-      toast.error("Помилка відправки: " + error.message);
+      toast.error("Помилка: " + error.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const saveAdminNote = async () => {
+    if (!selectedTask || !isAdminView) return;
+    try {
+      const { error } = await supabase
+        .from("work_types")
+        .update({ notes: adminNote })
+        .eq("id", selectedTask.id);
+
+      if (error) throw error;
+      toast.success("Нотатку збережено");
+      fetchMyTasks();
+    } catch (error) {
+      toast.error("Помилка збереження: " + error.message);
     }
   };
 
@@ -406,88 +559,69 @@ const WorkerPortal = () => {
     }
   };
 
-  const toggleGroup = (groupName, defaultState = false) => {
-    setExpandedGroups((prev) => {
-      const currentState =
-        prev[groupName] !== undefined ? prev[groupName] : defaultState;
-      return { ...prev, [groupName]: !currentState };
-    });
-  };
-
+  // ФІЛЬТРАЦІЯ ДЛЯ РОБОЧОЇ ВКЛАДКИ
   const filteredTasks = myTasks.filter((t) => {
     const matchesSearch =
       (t.address || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
       (t.task_name || "").toLowerCase().includes(searchTerm.toLowerCase());
     const matchesTab =
       workFilter === "active" ? t.status !== "Ready" : t.status === "Ready";
+
     return matchesSearch && matchesTab;
   });
 
-  const groupedTasks = useMemo(() => {
-    const groups = {};
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+  // ВІДЖЕТ КАЛЕНДАРЯ: ФІЛЬТРАЦІЯ
+  const tasksForSelectedDate = useMemo(() => {
+    const selectedDateString = format(calendarDate, "yyyy-MM-dd");
+    return myTasks.filter((t) => t.date === selectedDateString);
+  }, [myTasks, calendarDate]);
 
-    filteredTasks.forEach((task) => {
-      if (!task.date) return;
-
-      const taskDate = parseISO(task.date);
-      const tDate = new Date(taskDate);
-      tDate.setHours(0, 0, 0, 0);
-      const dateValue = tDate.getTime();
-
-      let groupKey, groupTitle, category;
-
-      if (dateValue === today.getTime()) {
-        groupKey = "today";
-        groupTitle = `🔥 Сьогодні (${format(taskDate, "dd MMM")})`;
-        category = 1;
-      } else if (dateValue === tomorrow.getTime()) {
-        groupKey = "tomorrow";
-        groupTitle = `📅 Завтра (${format(taskDate, "dd MMM")})`;
-        category = 2;
-      } else {
-        groupKey = task.date;
-        groupTitle = `⏳ Майбутні: ${format(taskDate, "dd MMM yyyy")}`;
-        category = 3;
-      }
-
-      if (!groups[groupKey]) {
-        groups[groupKey] = {
-          title: groupTitle,
-          tasks: [],
-          category: category,
-          dateValue: dateValue,
-        };
-      }
-      groups[groupKey].tasks.push(task);
+  const filteredDayTasks = useMemo(() => {
+    return tasksForSelectedDate.filter((t) => {
+      const matchesSearch =
+        (t.address || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (t.task_name || "").toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesTab =
+        workFilter === "active" ? t.status !== "Ready" : t.status === "Ready";
+      return matchesSearch && matchesTab;
     });
+  }, [tasksForSelectedDate, searchTerm, workFilter]);
 
-    Object.values(groups).forEach((group) => {
-      group.tasks.sort(
-        (a, b) =>
-          new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime(),
-      );
-    });
-
-    return Object.entries(groups)
-      .map(([key, value]) => ({ key, ...value }))
-      .sort((a, b) => {
-        if (a.category !== b.category) return a.category - b.category;
-        return a.dateValue - b.dateValue;
-      });
-  }, [filteredTasks]);
-
-  const activeCount = myTasks.filter((t) => t.status !== "Ready").length;
-  const completedCount = myTasks.filter((t) => t.status === "Ready").length;
+  const activeCount = tasksForSelectedDate.filter(
+    (t) => t.status !== "Ready",
+  ).length;
+  const completedCount = tasksForSelectedDate.filter(
+    (t) => t.status === "Ready",
+  ).length;
 
   const renderTaskCard = (task) => (
     <div
       key={task.id}
       className={styles.projectCard}
-      onClick={() => setSelectedTask(task)}
+      onClick={() => {
+        setSelectedTask(task);
+        setAdminNote(task.notes || "");
+        if (task.latestReport && canEditReport(task.latestReport.report_date)) {
+          setFormData({
+            workerStatus: task.status || "Ready",
+            notes: task.latestReport.notes
+              .replace(/\[Завдання: .*?\]\n?/, "")
+              .replace(/\[Статус від працівника: .*?\]\n?/, ""),
+            photosBefore: task.latestReport.photos_before || [],
+            photosAfter: task.latestReport.photos_after || [],
+          });
+        } else {
+          setFormData({
+            workerStatus: task.status || "In Process",
+            notes: "",
+            photosBefore: [],
+            photosAfter: [],
+          });
+        }
+
+        // ЗНИЩИТИ СПОВІЩЕННЯ ДЛЯ ЦЬОГО ЗАВДАННЯ, ЯКЩО ВОНО БУЛО ПРОЧИТАНО РУКАМИ
+        markTaskNotificationsAsRead(task);
+      }}
     >
       <div className={styles.cardHeader}>
         <div className={styles.taskTitleGroup}>
@@ -522,6 +656,31 @@ const WorkerPortal = () => {
     </div>
   );
 
+  const renderCalendarDay = useCallback(
+    (day, date) => {
+      const formattedDate = format(date, "yyyy-MM-dd");
+      const jobsOnDay = myTasks.filter((t) => t.date === formattedDate);
+
+      let status = null;
+      if (jobsOnDay.length > 0) {
+        const hasUnfinished = jobsOnDay.some((job) => job.status !== "Ready");
+        status = hasUnfinished ? "red" : "green";
+      }
+
+      return (
+        <div className={styles.dateCell}>
+          <span>{day}</span>
+          {status && (
+            <div
+              className={`${styles.indicator} ${status === "red" ? styles.indicatorRed : styles.indicatorGreen}`}
+            />
+          )}
+        </div>
+      );
+    },
+    [myTasks],
+  );
+
   if (authLoading || !role)
     return (
       <div className={styles.loadingScreen}>Отримання прав доступу...</div>
@@ -536,32 +695,12 @@ const WorkerPortal = () => {
   return (
     <div className={styles.portalWrapper}>
       <div className={styles.portalContainer}>
-        {/* === ПЛАШКА РЕЖИМУ АДМІНА === */}
         {isAdminView && (
-          <div
-            style={{
-              backgroundColor: "#b02a48",
-              color: "white",
-              padding: "10px 20px",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              fontWeight: "600",
-              fontSize: "0.95rem",
-            }}
-          >
+          <div className={styles.adminBanner}>
             <span>👀 Режим імітації: {targetName}</span>
             <button
               onClick={() => navigate(-1)}
-              style={{
-                background: "rgba(255,255,255,0.2)",
-                border: "none",
-                color: "white",
-                padding: "6px 12px",
-                borderRadius: "6px",
-                cursor: "pointer",
-                fontWeight: "bold",
-              }}
+              className={styles.adminBannerBtn}
             >
               Вийти
             </button>
@@ -578,16 +717,54 @@ const WorkerPortal = () => {
               {!selectedTask ? (
                 <>
                   <div className={styles.topControls}>
+                    <div className={styles.calendarHeaderRow}>
+                      <button
+                        onClick={() =>
+                          setCalendarDate(subDays(calendarDate, 1))
+                        }
+                        className={styles.iconBtn}
+                      >
+                        <FaChevronLeft />
+                      </button>
+                      <button
+                        onClick={() => setCalendarDate(new Date())}
+                        className={styles.todayBtn}
+                      >
+                        Сьогодні
+                      </button>
+                      <DatePicker
+                        selected={calendarDate}
+                        onChange={(date) => setCalendarDate(date)}
+                        customInput={
+                          <button className={styles.datePickerBtn}>
+                            {format(calendarDate, "dd MMM yyyy")}{" "}
+                            <FaRegCalendarAlt />
+                          </button>
+                        }
+                        renderDayContents={renderCalendarDay}
+                        calendarClassName={styles.customCalendar}
+                      />
+                      <button
+                        onClick={() =>
+                          setCalendarDate(addDays(calendarDate, 1))
+                        }
+                        className={styles.iconBtn}
+                      >
+                        <FaChevronRight />
+                      </button>
+                    </div>
+
                     <div className={styles.searchContainer}>
                       <FaSearch className={styles.searchIcon} />
                       <input
                         type="text"
-                        placeholder="Пошук за адресою або назвою роботи..."
+                        placeholder="Пошук за адресою або назвою..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         className={styles.searchInput}
                       />
                     </div>
+
                     <div className={styles.filterTabs}>
                       <button
                         className={`${styles.filterTab} ${workFilter === "active" ? styles.activeFilterTab : ""}`}
@@ -604,57 +781,24 @@ const WorkerPortal = () => {
                     </div>
                   </div>
 
-                  {loading ? (
-                    <p className={styles.infoText}>Завантаження...</p>
-                  ) : filteredTasks.length === 0 ? (
-                    <p className={styles.infoText}>
-                      Немає завдань у цій категорії.
-                    </p>
-                  ) : (
-                    <div className={styles.projectList}>
-                      {groupedTasks.map((group) => {
-                        const defaultExpanded =
-                          group.category === 1 ||
-                          group.category === 2 ||
-                          group.category === 3;
-                        const isExpanded =
-                          expandedGroups[group.key] !== undefined
-                            ? expandedGroups[group.key]
-                            : defaultExpanded;
-
-                        return (
-                          <div key={group.key} className={styles.dateGroup}>
-                            <div
-                              className={styles.groupAccordionHeader}
-                              onClick={() =>
-                                toggleGroup(group.key, defaultExpanded)
-                              }
-                            >
-                              <span>
-                                {group.title} ({group.tasks.length})
-                              </span>
-                              {isExpanded ? (
-                                <FaChevronDown
-                                  className={styles.accordionIcon}
-                                />
-                              ) : (
-                                <FaChevronRight
-                                  className={styles.accordionIcon}
-                                />
-                              )}
-                            </div>
-                            {isExpanded && (
-                              <div className={styles.groupAccordionContent}>
-                                {group.tasks.map((task) =>
-                                  renderTaskCard(task),
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                  <div className={styles.projectList}>
+                    {loading ? (
+                      <p className={styles.infoText}>Завантаження...</p>
+                    ) : filteredDayTasks.length === 0 ? (
+                      <div
+                        className={styles.placeholderTab}
+                        style={{ height: "30vh" }}
+                      >
+                        <FaClipboardList
+                          size={40}
+                          className={styles.placeholderIcon}
+                        />
+                        <p>Немає завдань на цю дату.</p>
+                      </div>
+                    ) : (
+                      filteredDayTasks.map((task) => renderTaskCard(task))
+                    )}
+                  </div>
                 </>
               ) : (
                 <div className={styles.projectDetail}>
@@ -765,29 +909,36 @@ const WorkerPortal = () => {
                         {selectedTask.task_name}
                       </div>
 
-                      {selectedTask.notes && (
-                        <div
-                          style={{
-                            marginTop: "16px",
-                            padding: "12px",
-                            backgroundColor: "#fff9fa",
-                            borderLeft: "4px solid #b02a48",
-                            borderRadius: "0 6px 6px 0",
-                            fontSize: "0.95rem",
-                            color: "#333",
-                            boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-                          }}
-                        >
-                          <div
-                            style={{
-                              color: "#b02a48",
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "6px",
-                              fontWeight: "bold",
-                              marginBottom: "4px",
-                            }}
+                      {isAdminView ? (
+                        <div style={{ marginTop: "16px" }}>
+                          <label
+                            className={styles.sectionLabel}
+                            style={{ color: "#b02a48" }}
                           >
+                            <FaInfoCircle /> Написати нотатку працівнику:
+                          </label>
+                          <textarea
+                            className={styles.textarea}
+                            value={adminNote}
+                            onChange={(e) => setAdminNote(e.target.value)}
+                            style={{
+                              borderColor: "#b02a48",
+                              minHeight: "60px",
+                            }}
+                            placeholder="Нотатка буде видима працівнику (видаліть весь текст, щоб сховати)..."
+                          />
+                          <button
+                            onClick={saveAdminNote}
+                            className={styles.submitReportBtn}
+                            style={{ marginTop: "8px", padding: "8px" }}
+                          >
+                            <FaSave /> Зберегти нотатку
+                          </button>
+                        </div>
+                      ) : selectedTask.notes &&
+                        selectedTask.notes.trim() !== "" ? (
+                        <div className={styles.managerNoteBox}>
+                          <div className={styles.managerNoteHeader}>
                             <FaInfoCircle /> Нотатка від менеджера:
                           </div>
                           <div
@@ -799,77 +950,115 @@ const WorkerPortal = () => {
                             {selectedTask.notes}
                           </div>
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   </div>
 
-                  <form
-                    onSubmit={handleWorkSubmit}
-                    className={styles.reportForm}
-                  >
-                    <div className={styles.formGroup}>
-                      <label className={styles.sectionLabel}>
-                        Статус цього завдання
-                      </label>
-                      <select
-                        className={styles.statusSelect}
-                        value={formData.workerStatus}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            workerStatus: e.target.value,
-                          })
-                        }
-                      >
-                        <option value="Ready">Ready (Готово повністю)</option>
-                        <option value="In Process">
-                          In Process (В процесі виконання)
-                        </option>
-                        <option value="Not Finished">
-                          Not Finished (Не завершено)
-                        </option>
-                      </select>
-                    </div>
-
-                    <div className={styles.formGroup}>
-                      <label className={styles.sectionLabel}>
-                        Нотатки до звіту (опціонально)
-                      </label>
-                      <textarea
-                        value={formData.notes}
-                        onChange={(e) =>
-                          setFormData({ ...formData, notes: e.target.value })
-                        }
-                        placeholder="Опишіть виконану роботу або проблеми..."
-                        className={styles.textarea}
-                      />
-                    </div>
-
-                    <div className={styles.photoUploaders}>
-                      <PhotoUploader
-                        label="Фото ДО (опціонально)"
-                        bucketName="worker-photos"
-                        onUploadComplete={(urls) =>
-                          setFormData({ ...formData, photosBefore: urls })
-                        }
-                      />
-                      <PhotoUploader
-                        label="Фото ПІСЛЯ (рекомендується)"
-                        bucketName="worker-photos"
-                        onUploadComplete={(urls) =>
-                          setFormData({ ...formData, photosAfter: urls })
-                        }
-                      />
-                    </div>
-
-                    <button
-                      type="submit"
-                      disabled={loading}
-                      className={styles.submitReportBtn}
+                  {selectedTask.latestReport &&
+                  !canEditReport(selectedTask.latestReport.report_date) ? (
+                    <div
+                      className={styles.instructionBlock}
+                      style={{
+                        backgroundColor: "#f0fdf4",
+                        borderColor: "#4ade80",
+                      }}
                     >
-                      {loading ? "Відправка..." : "Зберегти звіт"}
-                    </button>
-                  </form>
+                      <div
+                        className={styles.instructionHeader}
+                        style={{ color: "#166534" }}
+                      >
+                        <FaCheckDouble className={styles.instructionIcon} />
+                        <h3>Звіт вже відправлено</h3>
+                      </div>
+                      <p style={{ fontSize: "0.9rem", color: "#166534" }}>
+                        Час на редагування цього звіту вийшов. Якщо виникла
+                        помилка, зверніться до менеджера.
+                      </p>
+                      <div
+                        style={{
+                          padding: "10px",
+                          backgroundColor: "#fff",
+                          borderRadius: "8px",
+                          border: "1px solid #4ade80",
+                          whiteSpace: "pre-wrap",
+                          marginTop: "10px",
+                          fontSize: "0.95rem",
+                        }}
+                      >
+                        {selectedTask.latestReport.notes}
+                      </div>
+                    </div>
+                  ) : (
+                    <form
+                      onSubmit={handleWorkSubmit}
+                      className={styles.reportForm}
+                    >
+                      <div className={styles.formGroup}>
+                        <label className={styles.sectionLabel}>
+                          Статус цього завдання
+                        </label>
+                        <select
+                          className={styles.statusSelect}
+                          value={formData.workerStatus}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              workerStatus: e.target.value,
+                            })
+                          }
+                        >
+                          <option value="Ready">Ready (Готово повністю)</option>
+                          <option value="In Process">
+                            In Process (В процесі виконання)
+                          </option>
+                          <option value="Not Finished">
+                            Not Finished (Не завершено)
+                          </option>
+                        </select>
+                      </div>
+
+                      <div className={styles.formGroup}>
+                        <label className={styles.sectionLabel}>
+                          Нотатки до звіту (опціонально)
+                        </label>
+                        <textarea
+                          value={formData.notes}
+                          onChange={(e) =>
+                            setFormData({ ...formData, notes: e.target.value })
+                          }
+                          placeholder="Опишіть виконану роботу або проблеми..."
+                          className={styles.textarea}
+                        />
+                      </div>
+
+                      <div className={styles.photoUploaders}>
+                        <PhotoUploader
+                          label="Фото ДО (опціонально)"
+                          bucketName="worker-photos"
+                          onUploadComplete={(urls) =>
+                            setFormData({ ...formData, photosBefore: urls })
+                          }
+                        />
+                        <PhotoUploader
+                          label="Фото ПІСЛЯ (рекомендується)"
+                          bucketName="worker-photos"
+                          onUploadComplete={(urls) =>
+                            setFormData({ ...formData, photosAfter: urls })
+                          }
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className={styles.submitReportBtn}
+                      >
+                        {selectedTask.latestReport
+                          ? "Оновити звіт"
+                          : "Відправити звіт"}
+                      </button>
+                    </form>
+                  )}
                 </div>
               )}
             </div>
@@ -878,37 +1067,78 @@ const WorkerPortal = () => {
           {activeTab === "profile" && (
             <div className={styles.profileTab}>
               <div className={styles.profileInfo}>
-                <p>
-                  <strong>Ім'я:</strong> {profile.first_name || targetName}{" "}
-                  {profile.last_name}
-                </p>
-                <p>
-                  <strong>Статус:</strong>{" "}
-                  {profile.status === "approved"
-                    ? "Затверджено"
-                    : "На перевірці"}
-                </p>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "16px",
+                    marginBottom: "16px",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: "60px",
+                      height: "60px",
+                      borderRadius: "50%",
+                      backgroundColor: "#e8e6df",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: "1.5rem",
+                      color: "#b02a48",
+                    }}
+                  >
+                    <FaUser />
+                  </div>
+                  <div>
+                    <h2 style={{ margin: 0, fontSize: "1.2rem" }}>
+                      {profile.first_name || targetName}
+                    </h2>
+                    <span
+                      style={{
+                        color:
+                          profile.status === "approved" ? "#28a745" : "#d39e00",
+                        fontWeight: "bold",
+                        fontSize: "0.9rem",
+                      }}
+                    >
+                      {profile.status === "approved"
+                        ? "Активний"
+                        : "На перевірці"}
+                    </span>
+                  </div>
+                </div>
               </div>
+
               <h3 className={styles.subTitle}>Мої документи</h3>
               <PhotoUploader
-                label="Завантажити документ (ID, Сертифікати)"
+                label="Додати новий документ"
                 bucketName="worker-documents"
                 onUploadComplete={handleDocumentUploadComplete}
               />
-              {documents.length > 0 && (
-                <ul className={styles.documentList}>
+
+              {documents.length > 0 ? (
+                <div className={styles.docsGrid}>
                   {documents.map((doc, index) => (
-                    <li key={doc.id || index}>
-                      <a
-                        href={doc.file_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        Переглянути документ #{index + 1}
-                      </a>
-                    </li>
+                    <a
+                      key={doc.id || index}
+                      href={doc.file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={styles.docCard}
+                    >
+                      <FaFileAlt className={styles.docIcon} />
+                      <span>Документ #{index + 1}</span>
+                    </a>
                   ))}
-                </ul>
+                </div>
+              ) : (
+                <p
+                  className={styles.infoText}
+                  style={{ padding: 0, marginTop: "12px" }}
+                >
+                  Документів ще немає
+                </p>
               )}
             </div>
           )}
@@ -916,7 +1146,7 @@ const WorkerPortal = () => {
           {activeTab === "notifications" && (
             <div className={styles.notificationsTab}>
               <div className={styles.notifHeaderWrapper}>
-                <h2 style={{ margin: 0 }}>Сповіщення</h2>
+                <h2 style={{ margin: 0 }}>Останні сповіщення</h2>
                 {notifications.length > 0 && (
                   <button onClick={markAllAsRead} className={styles.markAllBtn}>
                     <FaCheckDouble /> Прочитати все
@@ -927,21 +1157,19 @@ const WorkerPortal = () => {
               {notifications.length === 0 ? (
                 <div className={styles.placeholderTab}>
                   <FaBell size={40} className={styles.placeholderIcon} />
-                  <p>Немає нових повідомлень.</p>
+                  <p>Немає нових сповіщень.</p>
                 </div>
               ) : (
                 <div className={styles.notifList}>
                   {notifications.map((n) => (
                     <div
                       key={n.id}
-                      className={`${styles.notifCard} ${!n.is_read ? styles.notifUnread : ""}`}
+                      className={styles.notifCard}
                       onClick={() => handleNotificationClick(n)}
                     >
                       <div className={styles.notifTitleRow}>
                         <span className={styles.notifTitle}>{n.title}</span>
-                        {!n.is_read && (
-                          <span className={styles.unreadDot}></span>
-                        )}
+                        <span className={styles.unreadDot}></span>
                       </div>
                       <p className={styles.notifMessage}>{n.message}</p>
                       <span className={styles.notifDate}>
