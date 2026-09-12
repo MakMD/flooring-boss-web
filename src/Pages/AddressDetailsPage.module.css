@@ -398,47 +398,6 @@
   transform: scale(1.1);
 }
 
-/* --- Мобільна адаптація --- */
-@media (max-width: 767px) {
-  .pageContainer {
-    padding: 0;
-    width: 100vw;
-    margin-left: calc(-50vw + 50%);
-    margin-right: calc(-50vw + 50%);
-  }
-  .mobileLayout {
-    border-radius: 0;
-  }
-  .header {
-    border-radius: 0;
-    flex-direction: column;
-  }
-  .header button {
-    width: 100%;
-  }
-  .detailsGrid {
-    padding: 10px;
-    gap: 10px;
-  }
-  .detailCard {
-    border-radius: 0;
-    border-left: none;
-    border-right: none;
-    border-top: none;
-    box-shadow: none;
-  }
-  .detailItem {
-    grid-template-columns: 1fr;
-    gap: 4px;
-    align-items: flex-start;
-  }
-  .detailItem label {
-    font-size: 0.8rem;
-  }
-  .fullWidthSection {
-    padding: 0 10px 20px 10px;
-  }
-}
 /* --- КНОПКИ НАВІГАЦІЇ LIGHTBOX --- */
 .navBtnLeft,
 .navBtnRight {
@@ -483,4 +442,47 @@
   border-radius: 20px;
   font-weight: bold;
   font-size: 1rem;
+}
+
+/* --- Мобільна адаптація --- */
+@media (max-width: 767px) {
+  .pageContainer {
+    padding: 0;
+    width: 100%;
+    margin: 0;
+    box-sizing: border-box;
+  }
+  .mobileLayout {
+    border-radius: 0;
+    width: 100%;
+  }
+  .header {
+    border-radius: 0;
+    flex-direction: column;
+  }
+  .header button {
+    width: 100%;
+  }
+  .detailsGrid {
+    padding: 10px;
+    gap: 10px;
+  }
+  .detailCard {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    box-shadow: none;
+  }
+  .detailItem {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    align-items: flex-start;
+  }
+  .detailItem label {
+    font-size: 0.8rem;
+  }
+  .fullWidthSection {
+    padding: 0 10px 20px 10px;
+  }
 }

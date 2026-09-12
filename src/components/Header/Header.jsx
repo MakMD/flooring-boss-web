@@ -24,7 +24,6 @@ const Header = () => {
   const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Стейт для сповіщень
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
@@ -53,7 +52,6 @@ const Header = () => {
     setIsNotifOpen(false);
   };
 
-  // Завантаження сповіщень
   useEffect(() => {
     if (!user || userRole !== "admin") return;
 
@@ -66,9 +64,7 @@ const Header = () => {
           .order("created_at", { ascending: false })
           .limit(50);
 
-        if (error) {
-          throw error;
-        }
+        if (error) throw error;
 
         if (data) {
           setNotifications(data);
@@ -81,7 +77,6 @@ const Header = () => {
 
     fetchNotifications();
 
-    // Підписка на оновлення в реальному часі
     const subscription = supabase
       .channel("admin_notifications")
       .on(
@@ -103,7 +98,6 @@ const Header = () => {
     };
   }, [user, userRole]);
 
-  // Закриття оверлею при кліку за його межами
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (notifRef.current && !notifRef.current.contains(event.target)) {
@@ -193,7 +187,7 @@ const Header = () => {
           </div>
         )}
 
-        {/* === ПОСИЛАННЯ ДЛЯ АДМІНІСТРАТОРА === */}
+        {/* === ОНОВЛЕНИЙ ПОРЯДОК МЕНЮ ДЛЯ АДМІНІСТРАТОРА === */}
         {userRole === "admin" && (
           <>
             <Link
@@ -203,6 +197,24 @@ const Header = () => {
             >
               <FaProjectDiagram />
               Projects
+            </Link>
+
+            <Link
+              to="/calendar"
+              className={getLinkClass("/calendar")}
+              onClick={closeMobileMenu}
+            >
+              <FaCalendarAlt />
+              Calendar
+            </Link>
+
+            <Link
+              to="/people"
+              className={getLinkClass("/people")}
+              onClick={closeMobileMenu}
+            >
+              <FaUsers />
+              People
             </Link>
 
             <Link
@@ -224,22 +236,6 @@ const Header = () => {
             </Link>
 
             <Link
-              to="/people"
-              className={getLinkClass("/people")}
-              onClick={closeMobileMenu}
-            >
-              <FaUsers />
-              People
-            </Link>
-            <Link
-              to="/calendar"
-              className={getLinkClass("/calendar")}
-              onClick={closeMobileMenu}
-            >
-              <FaCalendarAlt />
-              Calendar
-            </Link>
-            <Link
               to="/admin"
               className={getLinkClass("/admin")}
               onClick={closeMobileMenu}
@@ -250,7 +246,6 @@ const Header = () => {
           </>
         )}
 
-        {/* === ПОСИЛАННЯ ДЛЯ ПРАЦІВНИКА === */}
         {userRole === "worker" && (
           <div
             className={styles.navLink}
@@ -260,9 +255,7 @@ const Header = () => {
           </div>
         )}
 
-        {/* Контроли (Сповіщення та Вихід) */}
         <div className={styles.navControls}>
-          {/* === ДЗВІНОЧОК СПОВІЩЕНЬ (Тільки для Адміна) === */}
           {userRole === "admin" && (
             <div className={styles.notifContainer} ref={notifRef}>
               <button
@@ -277,7 +270,6 @@ const Header = () => {
                 )}
               </button>
 
-              {/* ВИПАДАЮЧЕ ВІКНО СПОВІЩЕНЬ */}
               {isNotifOpen && (
                 <div className={styles.notifDropdown}>
                   <div className={styles.notifHeader}>
@@ -342,9 +334,7 @@ const Header = () => {
       <div
         className={styles.overlay}
         onClick={closeMobileMenu}
-        style={{
-          display: isMobileMenuOpen ? "block" : "none",
-        }}
+        style={{ display: isMobileMenuOpen ? "block" : "none" }}
       ></div>
     </header>
   );

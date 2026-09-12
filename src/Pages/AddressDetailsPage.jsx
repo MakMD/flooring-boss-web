@@ -19,6 +19,7 @@ import {
   FaChevronUp,
   FaChevronLeft,
   FaChevronRight,
+  FaShareAlt,
 } from "react-icons/fa";
 import styles from "./AddressDetailsPage.module.css";
 import commonStyles from "../styles/common.module.css";
@@ -90,7 +91,6 @@ const FileListItem = ({
     }
     if (isImage(signedUrl) || isImage(fileIdentifier)) {
       e.preventDefault();
-      // Передаємо масив всіх картинок і поточний signedUrl
       const currentIndex = allImages.findIndex((img) => img === fileIdentifier);
       onImageClick(allImages, currentIndex !== -1 ? currentIndex : 0);
     }
@@ -110,13 +110,15 @@ const FileListItem = ({
         {isLoading ? <FaSpinner className={styles.spinner} /> : <FaFileAlt />}
         {fileName}
       </a>
-      <button
-        onClick={() => onDelete(fileIdentifier)}
-        className={commonStyles.buttonIcon}
-        disabled={isLoading}
-      >
-        <FaTrash />
-      </button>
+      <div style={{ display: "flex", gap: "8px" }}>
+        <button
+          onClick={() => onDelete(fileIdentifier)}
+          className={commonStyles.buttonIcon}
+          disabled={isLoading}
+        >
+          <FaTrash />
+        </button>
+      </div>
     </li>
   );
 };
@@ -144,7 +146,6 @@ const AddressDetailsPage = () => {
   const [reports, setReports] = useState([]);
   const [expandedReports, setExpandedReports] = useState({});
 
-  // === СТЕЙТИ ДЛЯ ГАЛЕРЕЇ (LIGHTBOX) ===
   const [lightboxImages, setLightboxImages] = useState([]);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
@@ -200,7 +201,6 @@ const AddressDetailsPage = () => {
       ];
 
       if (workerIds.length > 0) {
-        // === БЕРЕМО РЕАЛЬНІ ІМЕНА З ТАБЛИЦІ PEOPLE ===
         const { data: peopleData } = await supabase
           .from("people")
           .select("id, user_id, name")
@@ -247,7 +247,6 @@ const AddressDetailsPage = () => {
     fetchData();
   }, [fetchData]);
 
-  // === ФУНКЦІЇ LIGHTBOX ===
   const openLightbox = (imagesArray, startIndex = 0) => {
     setLightboxImages(imagesArray);
     setCurrentImageIndex(startIndex);
@@ -403,9 +402,7 @@ const AddressDetailsPage = () => {
       path = url.pathname.substring(
         url.pathname.indexOf(BUCKET_NAME) + BUCKET_NAME.length + 1,
       );
-    } catch (e) {
-      /* ignore */
-    }
+    } catch (e) {}
     const { error } = await supabase.storage.from(BUCKET_NAME).remove([path]);
     if (error) {
       toast.error("Failed to delete file.");
@@ -418,26 +415,20 @@ const AddressDetailsPage = () => {
     if (updated) toast.success("File deleted successfully!");
   };
 
-  // === АПРУВ КОНКРЕТНОЇ РОБОТИ ===
   const handleApproveReport = async (e, report) => {
     e.stopPropagation();
-
     if (!report.work_type_id) {
       toast.error("Помилка: не знайдено ID завдання для цього звіту.");
       return;
     }
-
     try {
-      // Оновлюємо статус лише для work_types
       const { error: updateError } = await supabase
         .from("work_types")
         .update({ status: "Ready" })
         .eq("id", report.work_type_id);
-
       if (updateError) throw updateError;
-
       toast.success("Роботу підтверджено!");
-      fetchData(); // Оновлюємо дані, щоб бейджі змінилися
+      fetchData();
     } catch (error) {
       toast.error("Помилка підтвердження: " + error.message);
     }
@@ -461,16 +452,65 @@ const AddressDetailsPage = () => {
   return (
     <div className={styles.pageContainer}>
       <div className={styles.mobileLayout}>
-        {/* === LIGHTBOX === */}
+        {/* === LIGHTBOX З КНОПКОЮ SHARE === */}
         {lightboxImages.length > 0 && (
           <div
             className={styles.lightbox}
             onClick={closeLightbox}
             onWheel={handleWheel}
           >
-            <button className={styles.closeLightbox} onClick={closeLightbox}>
-              <FaTimes />
-            </button>
+            <div
+              style={{
+                position: "absolute",
+                top: "20px",
+                right: "20px",
+                display: "flex",
+                gap: "16px",
+                zIndex: 100000,
+              }}
+            >
+              {/* КНОПКА SHARE */}
+              <button
+                style={{
+                  background: "rgba(0,0,0,0.5)",
+                  border: "none",
+                  color: "white",
+                  fontSize: "1.5rem",
+                  cursor: "pointer",
+                  padding: "10px 14px",
+                  borderRadius: "8px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  transition: "background 0.2s",
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const url = lightboxImages[currentImageIndex];
+                  if (navigator.share) {
+                    navigator
+                      .share({
+                        title: "Worker Photo",
+                        url: url,
+                      })
+                      .catch((err) => console.log("Share failed:", err));
+                  } else {
+                    toast.error("Share feature not supported on this browser.");
+                  }
+                }}
+                title="Відправити фото у WhatsApp/Telegram"
+              >
+                <FaShareAlt />
+              </button>
+              {/* КНОПКА ЗАКРИТТЯ */}
+              <button
+                className={styles.closeLightbox}
+                style={{ position: "static" }}
+                onClick={closeLightbox}
+              >
+                <FaTimes />
+              </button>
+            </div>
 
             {lightboxImages.length > 1 && (
               <button className={styles.navBtnLeft} onClick={showPrevImage}>
@@ -535,7 +575,6 @@ const AddressDetailsPage = () => {
         </div>
 
         <div className={styles.detailsGrid}>
-          {/* ЛІВА КОЛОНКА */}
           <div className={styles.gridColumn}>
             <div className={styles.detailCard}>
               <h3>General Project Details</h3>
@@ -768,7 +807,6 @@ const AddressDetailsPage = () => {
             )}
           </div>
 
-          {/* ПРАВА КОЛОНКА */}
           <div className={styles.gridColumn}>
             <div className={styles.detailCard}>
               <h3>Worker Daily Reports</h3>
@@ -1088,7 +1126,6 @@ const AddressDetailsPage = () => {
           </div>
         </div>
 
-        {/* === ПОВНОЕКРАННИЙ БЛОК ДЛЯ РОБІТ === */}
         <div className={styles.fullWidthSection}>
           <div className={styles.detailCard}>
             <h3>Work Types & Payments</h3>

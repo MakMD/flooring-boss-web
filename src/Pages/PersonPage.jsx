@@ -9,7 +9,6 @@ import {
   FaCheck,
   FaFolder,
   FaUserCog,
-  FaEye,
 } from "react-icons/fa";
 import { MdOutlineChevronRight } from "react-icons/md";
 import { supabase } from "../supabaseClient";
@@ -135,16 +134,6 @@ const PersonPage = () => {
             {person ? `${person.name}'s Tables` : "Loading..."}
           </h1>
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            {/* НОВА КНОПКА РЕЖИМУ ПЕРЕГЛЯДУ */}
-            <button
-              className={commonStyles.buttonSecondary}
-              onClick={() => navigate(`/worker-view/${person.id}`)}
-              disabled={!person}
-              title="Переглянути кабінет від імені цього працівника"
-            >
-              <FaEye /> Кабінет
-            </button>
-
             <button
               className={commonStyles.buttonSecondary}
               onClick={() => setShowProfile(true)}
