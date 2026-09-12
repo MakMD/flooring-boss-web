@@ -64,10 +64,9 @@ const CalendarPage = () => {
     return "day";
   });
 
-  // НОВИЙ СТЕЙТ ДЛЯ ВКЛАДОК (Адреси/Сервіси)
   const [projectTab, setProjectTab] = useState("Address");
 
-  const [events, setEvents] = useState([]);
+  const [allEvents, setAllEvents] = useState([]); // ЗБЕРІГАЄМО ВСІ ПОДІЇ
   const [loading, setLoading] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -105,11 +104,11 @@ const CalendarPage = () => {
       endDate = format(endOfWeek(selectedDate, { weekStartsOn }), "yyyy-MM-dd");
     }
 
+    // Завантажуємо ВСІ події, без фільтрації по типу проекту, щоб порахувати бейджі
     const { data, error } = await supabase
       .from("addresses")
       .select("*, builders(name), stores(name), work_types(person_id)")
       .eq("is_deleted", false)
-      .eq("project_type", projectTab) // Фільтрація за вкладкою
       .gte("date", startDate)
       .lte("date", endDate)
       .order("date", { ascending: true })
@@ -119,10 +118,10 @@ const CalendarPage = () => {
       toast.error("Could not fetch calendar events.");
       console.error(error);
     } else {
-      setEvents(data || []);
+      setAllEvents(data || []);
     }
     setLoading(false);
-  }, [selectedDate, viewMode, projectTab]);
+  }, [selectedDate, viewMode]);
 
   useEffect(() => {
     fetchEvents();
@@ -137,7 +136,7 @@ const CalendarPage = () => {
         .from("addresses")
         .select("date, status")
         .eq("is_deleted", false)
-        .eq("project_type", projectTab) // Фільтрація індикаторів місяця
+        .eq("project_type", projectTab)
         .gte("date", start)
         .lte("date", end);
 
@@ -199,32 +198,11 @@ const CalendarPage = () => {
     setCalendarMonth(newDate);
   };
 
-  const uniqueBuilders = useMemo(
-    () =>
-      [
-        "All",
-        ...new Set(events.map((e) => e.builders?.name).filter(Boolean)),
-      ].sort(),
-    [events],
-  );
-
-  const uniqueStores = useMemo(
-    () =>
-      [
-        "All",
-        ...new Set(events.map((e) => e.stores?.name).filter(Boolean)),
-      ].sort(),
-    [events],
-  );
-
-  const uniqueStatuses = useMemo(
-    () =>
-      ["All", ...new Set(events.map((e) => e.status).filter(Boolean))].sort(),
-    [events],
-  );
-
   const filteredEvents = useMemo(() => {
-    return events.filter((event) => {
+    return allEvents.filter((event) => {
+      // Спочатку фільтруємо за активною вкладкою (Address або Service)
+      if (event.project_type !== projectTab) return false;
+
       const query = searchQuery.toLowerCase().trim();
       const address = (event.address || "").toLowerCase();
       const builder = (event.builders?.name || "").toLowerCase();
@@ -245,7 +223,56 @@ const CalendarPage = () => {
 
       return matchesSearch && matchesBuilder && matchesStore && matchesStatus;
     });
-  }, [events, searchQuery, selectedBuilder, selectedStore, selectedStatus]);
+  }, [
+    allEvents,
+    projectTab,
+    searchQuery,
+    selectedBuilder,
+    selectedStore,
+    selectedStatus,
+  ]);
+
+  const uniqueBuilders = useMemo(
+    () =>
+      [
+        "All",
+        ...new Set(
+          allEvents
+            .filter((e) => e.project_type === projectTab)
+            .map((e) => e.builders?.name)
+            .filter(Boolean),
+        ),
+      ].sort(),
+    [allEvents, projectTab],
+  );
+
+  const uniqueStores = useMemo(
+    () =>
+      [
+        "All",
+        ...new Set(
+          allEvents
+            .filter((e) => e.project_type === projectTab)
+            .map((e) => e.stores?.name)
+            .filter(Boolean),
+        ),
+      ].sort(),
+    [allEvents, projectTab],
+  );
+
+  const uniqueStatuses = useMemo(
+    () =>
+      [
+        "All",
+        ...new Set(
+          allEvents
+            .filter((e) => e.project_type === projectTab)
+            .map((e) => e.status)
+            .filter(Boolean),
+        ),
+      ].sort(),
+    [allEvents, projectTab],
+  );
 
   const groupedEvents = useMemo(() => {
     return filteredEvents.reduce((acc, event) => {
@@ -366,6 +393,14 @@ const CalendarPage = () => {
     );
   };
 
+  // === ПІДРАХУНОК ЛІЧИЛЬНИКІВ ===
+  const addressCount = allEvents.filter(
+    (e) => e.project_type === "Address",
+  ).length;
+  const serviceCount = allEvents.filter(
+    (e) => e.project_type === "Service",
+  ).length;
+
   return (
     <div className={styles.calendarContainer}>
       <div className={styles.mobileLayout}>
@@ -431,7 +466,7 @@ const CalendarPage = () => {
             />
           </div>
 
-          {/* Вкладки (Адреси / Сервіси) */}
+          {/* Вкладки (Адреси / Сервіси) з Лічильниками */}
           <div style={{ display: "flex", gap: "10px", width: "100%" }}>
             <button
               onClick={() => setProjectTab("Address")}
@@ -448,9 +483,27 @@ const CalendarPage = () => {
                     : "rgba(255, 255, 255, 0.1)",
                 color: projectTab === "Address" ? "#2c2c2c" : "#cbd5e1",
                 transition: "all 0.2s",
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+                gap: "8px",
               }}
             >
-              <FaBuilding style={{ marginRight: "6px" }} /> Адреси
+              <FaBuilding /> Адреси
+              {addressCount > 0 && (
+                <span
+                  style={{
+                    backgroundColor: "rgba(255,255,255,0.2)",
+                    color: projectTab === "Address" ? "#1a1a1a" : "#fff",
+                    padding: "2px 8px",
+                    borderRadius: "12px",
+                    fontSize: "0.8rem",
+                    marginLeft: "4px",
+                  }}
+                >
+                  {addressCount}
+                </span>
+              )}
             </button>
             <button
               onClick={() => setProjectTab("Service")}
@@ -467,9 +520,27 @@ const CalendarPage = () => {
                     : "rgba(255, 255, 255, 0.1)",
                 color: projectTab === "Service" ? "#2c2c2c" : "#cbd5e1",
                 transition: "all 0.2s",
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+                gap: "8px",
               }}
             >
-              <FaWrench style={{ marginRight: "6px" }} /> Сервіси
+              <FaWrench /> Сервіси
+              {serviceCount > 0 && (
+                <span
+                  style={{
+                    backgroundColor: "#ef4444", // Червоний бейдж для сервісів
+                    color: "#fff",
+                    padding: "2px 8px",
+                    borderRadius: "12px",
+                    fontSize: "0.8rem",
+                    marginLeft: "4px",
+                  }}
+                >
+                  {serviceCount}
+                </span>
+              )}
             </button>
           </div>
 
@@ -537,7 +608,6 @@ const CalendarPage = () => {
 
                 return (
                   <div key={dateKey} className={styles.dayGroup}>
-                    {/* Виділений заголовок дня */}
                     <div className={styles.dateMainHeader}>{displayDate}</div>
 
                     {storeNames.length === 0 ? (
@@ -585,7 +655,6 @@ const CalendarPage = () => {
                                             {event.notes}
                                           </div>
                                         )}
-                                        {/* Виводимо бейджі статусу */}
                                         {renderStatusBadges(event)}
                                       </div>
                                       <MdOutlineChevronRight
@@ -624,7 +693,6 @@ const CalendarPage = () => {
                                           />
                                           <span>{event.address}</span>
                                         </div>
-                                        {/* Виводимо бейджі статусу */}
                                         {renderStatusBadges(event)}
                                       </div>
                                       <MdOutlineChevronRight
