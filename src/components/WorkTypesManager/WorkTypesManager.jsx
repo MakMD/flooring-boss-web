@@ -198,6 +198,7 @@ const WorkTypesManager = ({ addressId, addressData }) => {
       person_id: null,
       payment_amount: wt.payment_amount ? parseFloat(wt.payment_amount) : 0,
       notes: wt.notes || wt.line_notes || null,
+      admin_note: wt.admin_note || null,
       date: wt.date || null,
     };
 
@@ -270,6 +271,7 @@ const WorkTypesManager = ({ addressId, addressData }) => {
         ? parseFloat(workTypeToUpdate.payment_amount)
         : 0,
       notes: noteToSave,
+      admin_note: workTypeToUpdate.admin_note || null,
       date: workTypeToUpdate.date || null,
     };
 
@@ -385,30 +387,105 @@ const WorkTypesManager = ({ addressId, addressData }) => {
               </div>
             </div>
 
+            {/* РЕДАГУВАННЯ ДВОХ ТИПІВ НОТАТОК */}
             {visibleNoteIds[wt.id] ? (
-              <div className={styles.noteEditBox}>
-                <textarea
-                  name="notes"
-                  value={
-                    wt.notes !== undefined && wt.notes !== null
-                      ? wt.notes
-                      : wt.line_notes || ""
-                  }
-                  onChange={(e) => handleInputChange(e, wt.id)}
-                  placeholder="Введіть інструкцію для працівника тут..."
-                  className={styles.noteTextarea}
-                />
+              <div
+                className={styles.noteEditBox}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "10px",
+                  marginTop: "10px",
+                }}
+              >
+                <div>
+                  <label
+                    style={{
+                      fontSize: "0.85rem",
+                      fontWeight: "bold",
+                      color: "#666",
+                    }}
+                  >
+                    Опис роботи / Інструкція (З ШІ або загальна):
+                  </label>
+                  <textarea
+                    name="notes"
+                    value={
+                      wt.notes !== undefined && wt.notes !== null
+                        ? wt.notes
+                        : wt.line_notes || ""
+                    }
+                    onChange={(e) => handleInputChange(e, wt.id)}
+                    placeholder="Введіть опис роботи..."
+                    className={styles.noteTextarea}
+                  />
+                </div>
+                <div>
+                  <label
+                    style={{
+                      fontSize: "0.85rem",
+                      fontWeight: "bold",
+                      color: "#b02a48",
+                    }}
+                  >
+                    Нотатка для працівника (Особиста):
+                  </label>
+                  <textarea
+                    name="admin_note"
+                    value={wt.admin_note || ""}
+                    onChange={(e) => handleInputChange(e, wt.id)}
+                    placeholder="Наприклад: 'Подзвони як закінчиш', 'Ключ під килимком'..."
+                    className={styles.noteTextarea}
+                    style={{ borderColor: "#b02a48" }}
+                  />
+                </div>
               </div>
-            ) : wt.notes || wt.line_notes ? (
+            ) : wt.notes || wt.line_notes || wt.admin_note ? (
               <div
                 className={styles.lineNotesBox}
                 onClick={() => toggleNoteInput(wt.id)}
                 title="Натисніть щоб редагувати"
+                style={{
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  gap: "4px",
+                }}
               >
-                <FaInfoCircle className={styles.infoIcon} />
-                <span className={styles.notesText}>
-                  {wt.notes || wt.line_notes}
-                </span>
+                {(wt.notes || wt.line_notes) && (
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "8px",
+                      alignItems: "flex-start",
+                    }}
+                  >
+                    <FaInfoCircle className={styles.infoIcon} />
+                    <span className={styles.notesText}>
+                      {wt.notes || wt.line_notes}
+                    </span>
+                  </div>
+                )}
+                {wt.admin_note && (
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "8px",
+                      alignItems: "flex-start",
+                      marginTop: wt.notes || wt.line_notes ? "4px" : "0",
+                    }}
+                  >
+                    <FaInfoCircle
+                      className={styles.infoIcon}
+                      style={{ color: "#b02a48" }}
+                    />
+                    <span
+                      className={styles.notesText}
+                      style={{ color: "#b02a48", fontWeight: "600" }}
+                    >
+                      Менеджер: {wt.admin_note}
+                    </span>
+                  </div>
+                )}
               </div>
             ) : null}
           </div>

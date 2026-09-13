@@ -71,6 +71,12 @@
   font-size: 0.85rem;
 }
 
+.headerBadges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .statusBadge {
   padding: 4px 10px;
   border-radius: 12px;
@@ -87,6 +93,28 @@
 .statusBadge.inactive {
   background-color: rgba(220, 53, 69, 0.15);
   color: #dc3545;
+}
+
+/* СТИЛІ ДЛЯ КНОПКИ КАБІНЕТУ */
+.viewAsButton {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background-color: #f0f4f8;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.viewAsButton:hover {
+  background-color: #e0f2fe;
+  color: #0c4a6e;
+  border-color: #7dd3fc;
 }
 
 .chevronIcon {

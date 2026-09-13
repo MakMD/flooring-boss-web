@@ -25,6 +25,8 @@ import {
   FaFileAlt,
   FaChevronLeft,
   FaChevronRight,
+  FaKey,
+  FaToolbox,
 } from "react-icons/fa";
 import { MdOutlineChevronRight } from "react-icons/md";
 import styles from "./WorkerPortal.module.css";
@@ -73,14 +75,40 @@ const WorkerPortal = () => {
     first_name: "",
     last_name: "",
     status: "pending",
+    keys_notes: "",
+    tools_notes: "",
   });
   const [documents, setDocuments] = useState([]);
+
+  const isReportApproved = selectedTask?.status === "Ready";
 
   const canEditReport = (reportDate) => {
     if (!reportDate) return false;
     const hoursDiff = differenceInHours(new Date(), parseISO(reportDate));
     return hoursDiff < 5;
   };
+
+  // --- ЗБЕРЕЖЕННЯ ЧЕРНЕТОК (LOCALSTORAGE) ---
+  useEffect(() => {
+    if (selectedTask && !isReportApproved && targetAuthId) {
+      const draftKey = `draft_${targetAuthId}_${selectedTask.id}`;
+      if (formData.photosBefore.length > 0 || formData.photosAfter.length > 0) {
+        localStorage.setItem(
+          draftKey,
+          JSON.stringify({
+            photosBefore: formData.photosBefore,
+            photosAfter: formData.photosAfter,
+          }),
+        );
+      }
+    }
+  }, [
+    formData.photosBefore,
+    formData.photosAfter,
+    selectedTask,
+    isReportApproved,
+    targetAuthId,
+  ]);
 
   useEffect(() => {
     const resolveTarget = async () => {
@@ -124,35 +152,44 @@ const WorkerPortal = () => {
     resolveTarget();
   }, [role, isAdminView, adminViewPersonId, user]);
 
-  const ensureProfileExists = useCallback(async () => {
+  const fetchProfileAndTools = useCallback(async () => {
     if (!targetAuthId) return;
-    try {
-      let { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", targetAuthId)
-        .maybeSingle();
 
-      if (error) throw error;
+    let { data: profileData } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", targetAuthId)
+      .maybeSingle();
 
-      if (!data && role === "worker") {
-        const newProfile = {
-          id: targetAuthId,
-          first_name: "Працівник",
-          last_name: "",
-          role: "worker",
-        };
-        const { error: insertError } = await supabase
-          .from("profiles")
-          .insert([newProfile]);
-        if (insertError) throw insertError;
-        data = newProfile;
-      }
-      if (data) setProfile(data);
-    } catch (error) {
-      console.error("Помилка профілю:", error.message);
+    if (!profileData && role === "worker") {
+      const newProfile = {
+        id: targetAuthId,
+        first_name: "Працівник",
+        last_name: "",
+        role: "worker",
+      };
+      await supabase.from("profiles").insert([newProfile]);
+      profileData = newProfile;
     }
-  }, [targetAuthId, role]);
+
+    if (targetPersonId) {
+      const { data: peopleData } = await supabase
+        .from("people")
+        .select("keys_notes, tools_notes")
+        .eq("id", targetPersonId)
+        .single();
+
+      if (peopleData) {
+        profileData = {
+          ...profileData,
+          keys_notes: peopleData.keys_notes,
+          tools_notes: peopleData.tools_notes,
+        };
+      }
+    }
+
+    if (profileData) setProfile(profileData);
+  }, [targetAuthId, targetPersonId, role]);
 
   const fetchMyTasks = useCallback(async () => {
     if (!targetPersonId) {
@@ -168,6 +205,7 @@ const WorkerPortal = () => {
           id,
           person_id,
           notes,
+          admin_note,
           date,
           status,
           work_type_templates (name),
@@ -226,32 +264,18 @@ const WorkerPortal = () => {
             date: taskDate,
             task_name: task.work_type_templates?.name || "Невідома робота",
             notes: task.notes,
+            admin_note: task.admin_note,
             builder_name: builder?.name || "Невідомий білдер",
             builder_instructions: builderNotes,
             status: task.status || "Assigned",
             latestReport: latestReport,
           };
         })
-        .filter((task) => {
-          if (!task.date) return false;
-
-          const parts = task.date.split("-");
-          if (parts.length !== 3) return false;
-
-          const taskDate = new Date(parts[0], parts[1] - 1, parts[2]);
-          taskDate.setHours(0, 0, 0, 0);
-
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-
-          return taskDate.getTime() >= today.getTime();
+        .sort((a, b) => {
+          if (!a.date) return 1;
+          if (!b.date) return -1;
+          return new Date(a.date) - new Date(b.date);
         });
-
-      formattedTasks.sort((a, b) => {
-        if (!a.date) return 1;
-        if (!b.date) return -1;
-        return new Date(a.date) - new Date(b.date);
-      });
 
       setMyTasks(formattedTasks);
     } catch (error) {
@@ -265,7 +289,6 @@ const WorkerPortal = () => {
   const fetchNotifications = useCallback(async () => {
     if (!targetAuthId) return;
 
-    // ТЯГНЕМО ЛИШЕ НЕПРОЧИТАНІ (НОВІ) СПОВІЩЕННЯ
     const { data, error } = await supabase
       .from("notifications")
       .select("*")
@@ -295,32 +318,22 @@ const WorkerPortal = () => {
     }
   }, [targetAuthId, myTasks]);
 
-  const fetchWorkerDocuments = useCallback(async () => {
-    if (!targetAuthId) return;
-    try {
-      const { data, error } = await supabase
-        .from("worker_documents")
-        .select("*")
-        .eq("worker_id", targetAuthId);
-      if (error) throw error;
-      setDocuments(data || []);
-    } catch (error) {
-      console.error("Помилка завантаження документів:", error.message);
-    }
-  }, [targetAuthId]);
-
   useEffect(() => {
     if (isTargetResolved) {
-      ensureProfileExists();
+      fetchProfileAndTools();
       fetchMyTasks();
-      fetchWorkerDocuments();
+
+      const fetchWorkerDocuments = async () => {
+        const { data } = await supabase
+          .from("worker_documents")
+          .select("*")
+          .eq("worker_id", targetAuthId);
+        setDocuments(data || []);
+      };
+
+      if (targetAuthId) fetchWorkerDocuments();
     }
-  }, [
-    isTargetResolved,
-    ensureProfileExists,
-    fetchMyTasks,
-    fetchWorkerDocuments,
-  ]);
+  }, [isTargetResolved, fetchProfileAndTools, fetchMyTasks, targetAuthId]);
 
   useEffect(() => {
     if (isTargetResolved && !loading) {
@@ -328,7 +341,6 @@ const WorkerPortal = () => {
     }
   }, [isTargetResolved, loading, fetchNotifications]);
 
-  // ФУНКЦІЯ: АВТОМАТИЧНЕ ПРИХОВУВАННЯ СПОВІЩЕНЬ ДЛЯ ВІДКРИТОЇ РОБОТИ
   const markTaskNotificationsAsRead = async (task) => {
     if (!task || notifications.length === 0) return;
 
@@ -343,11 +355,9 @@ const WorkerPortal = () => {
       .map((n) => n.id);
 
     if (unreadIds.length > 0) {
-      // Видаляємо візуально миттєво
       setNotifications((prev) => prev.filter((n) => !unreadIds.includes(n.id)));
       setUnreadCount((prev) => prev - unreadIds.length);
 
-      // Відмічаємо в базі
       await supabase
         .from("notifications")
         .update({ is_read: true })
@@ -367,7 +377,6 @@ const WorkerPortal = () => {
   };
 
   const handleNotificationClick = async (notification) => {
-    // Прибираємо зі списку відразу
     setNotifications((prev) => prev.filter((n) => n.id !== notification.id));
     setUnreadCount((prev) => prev - 1);
     await supabase
@@ -389,36 +398,43 @@ const WorkerPortal = () => {
     if (matchedTask) {
       const taskDateObj = parseISO(matchedTask.date);
       setCalendarDate(taskDateObj);
-      setSelectedTask(matchedTask);
-      setAdminNote(matchedTask.notes || "");
-
-      if (
-        matchedTask.latestReport &&
-        canEditReport(matchedTask.latestReport.report_date)
-      ) {
-        setFormData({
-          workerStatus: matchedTask.status || "Ready",
-          notes: matchedTask.latestReport.notes
-            .replace(/\[Завдання: .*?\]\n?/, "")
-            .replace(/\[Статус від працівника: .*?\]\n?/, ""),
-          photosBefore: matchedTask.latestReport.photos_before || [],
-          photosAfter: matchedTask.latestReport.photos_after || [],
-        });
-      } else {
-        setFormData({
-          workerStatus: matchedTask.status || "In Process",
-          notes: "",
-          photosBefore: [],
-          photosAfter: [],
-        });
-      }
-
-      // Чистимо інші можливі сповіщення для цієї ж адреси
-      markTaskNotificationsAsRead(matchedTask);
+      loadTaskData(matchedTask);
     } else {
       setSelectedTask(null);
       toast.error("Завдання не знайдено (можливо, воно видалене)");
     }
+  };
+
+  const loadTaskData = (task) => {
+    setSelectedTask(task);
+    setAdminNote(task.admin_note || "");
+    markTaskNotificationsAsRead(task);
+
+    const draftKey = `draft_${targetAuthId}_${task.id}`;
+    const draft = localStorage.getItem(draftKey);
+
+    let photosB = task.latestReport?.photos_before || [];
+    let photosA = task.latestReport?.photos_after || [];
+
+    if (draft && task.status !== "Ready") {
+      try {
+        const parsed = JSON.parse(draft);
+        photosB = [...new Set([...photosB, ...(parsed.photosBefore || [])])];
+        photosA = [...new Set([...photosA, ...(parsed.photosAfter || [])])];
+      } catch (e) {
+        console.error("Draft parse error", e);
+      }
+    }
+
+    setFormData({
+      workerStatus: task.status || "In Process",
+      notes:
+        task.latestReport?.notes
+          .replace(/\[Завдання: .*?\]\n?/, "")
+          .replace(/\[Статус від працівника: .*?\]\n?/, "") || "",
+      photosBefore: photosB,
+      photosAfter: photosA,
+    });
   };
 
   const handleDocumentUploadComplete = async (urls) => {
@@ -432,7 +448,12 @@ const WorkerPortal = () => {
       const { error } = await supabase.from("worker_documents").insert(newDocs);
       if (error) throw error;
       toast.success("Документи успішно завантажено!");
-      fetchWorkerDocuments();
+
+      const { data } = await supabase
+        .from("worker_documents")
+        .select("*")
+        .eq("worker_id", targetAuthId);
+      setDocuments(data || []);
     } catch (error) {
       toast.error("Помилка збереження: " + error.message);
     } finally {
@@ -450,7 +471,7 @@ const WorkerPortal = () => {
 
   const handleWorkSubmit = async (e) => {
     e.preventDefault();
-    if (!selectedTask) return;
+    if (!selectedTask || isReportApproved) return;
     if (!targetAuthId) {
       toast.error("Помилка: не знайдено ID працівника.");
       return;
@@ -514,6 +535,9 @@ const WorkerPortal = () => {
         }
       }
 
+      // Видаляємо чернетку після успішного збереження
+      localStorage.removeItem(`draft_${targetAuthId}_${selectedTask.id}`);
+
       toast.success("Збережено!");
       setSelectedTask(null);
       setFormData({
@@ -535,7 +559,7 @@ const WorkerPortal = () => {
     try {
       const { error } = await supabase
         .from("work_types")
-        .update({ notes: adminNote })
+        .update({ admin_note: adminNote })
         .eq("id", selectedTask.id);
 
       if (error) throw error;
@@ -558,17 +582,6 @@ const WorkerPortal = () => {
         return "Flooring Boss";
     }
   };
-
-  // ФІЛЬТРАЦІЯ ДЛЯ РОБОЧОЇ ВКЛАДКИ
-  const filteredTasks = myTasks.filter((t) => {
-    const matchesSearch =
-      (t.address || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (t.task_name || "").toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesTab =
-      workFilter === "active" ? t.status !== "Ready" : t.status === "Ready";
-
-    return matchesSearch && matchesTab;
-  });
 
   // ВІДЖЕТ КАЛЕНДАРЯ: ФІЛЬТРАЦІЯ
   const tasksForSelectedDate = useMemo(() => {
@@ -598,30 +611,7 @@ const WorkerPortal = () => {
     <div
       key={task.id}
       className={styles.projectCard}
-      onClick={() => {
-        setSelectedTask(task);
-        setAdminNote(task.notes || "");
-        if (task.latestReport && canEditReport(task.latestReport.report_date)) {
-          setFormData({
-            workerStatus: task.status || "Ready",
-            notes: task.latestReport.notes
-              .replace(/\[Завдання: .*?\]\n?/, "")
-              .replace(/\[Статус від працівника: .*?\]\n?/, ""),
-            photosBefore: task.latestReport.photos_before || [],
-            photosAfter: task.latestReport.photos_after || [],
-          });
-        } else {
-          setFormData({
-            workerStatus: task.status || "In Process",
-            notes: "",
-            photosBefore: [],
-            photosAfter: [],
-          });
-        }
-
-        // ЗНИЩИТИ СПОВІЩЕННЯ ДЛЯ ЦЬОГО ЗАВДАННЯ, ЯКЩО ВОНО БУЛО ПРОЧИТАНО РУКАМИ
-        markTaskNotificationsAsRead(task);
-      }}
+      onClick={() => loadTaskData(task)}
     >
       <div className={styles.cardHeader}>
         <div className={styles.taskTitleGroup}>
@@ -631,7 +621,9 @@ const WorkerPortal = () => {
           <h3 className={styles.taskTitle}>{task.task_name}</h3>
         </div>
         <span
-          className={`${styles.statusBadge} ${styles[task.status?.replace(/\s+/g, "")] || ""}`}
+          className={`${styles.statusBadge} ${
+            styles[task.status?.replace(/\s+/g, "")] || ""
+          }`}
         >
           {task.status}
         </span>
@@ -672,7 +664,9 @@ const WorkerPortal = () => {
           <span>{day}</span>
           {status && (
             <div
-              className={`${styles.indicator} ${status === "red" ? styles.indicatorRed : styles.indicatorGreen}`}
+              className={`${styles.indicator} ${
+                status === "red" ? styles.indicatorRed : styles.indicatorGreen
+              }`}
             />
           )}
         </div>
@@ -767,13 +761,19 @@ const WorkerPortal = () => {
 
                     <div className={styles.filterTabs}>
                       <button
-                        className={`${styles.filterTab} ${workFilter === "active" ? styles.activeFilterTab : ""}`}
+                        className={`${styles.filterTab} ${
+                          workFilter === "active" ? styles.activeFilterTab : ""
+                        }`}
                         onClick={() => setWorkFilter("active")}
                       >
                         В роботі ({activeCount})
                       </button>
                       <button
-                        className={`${styles.filterTab} ${workFilter === "completed" ? styles.activeFilterTab : ""}`}
+                        className={`${styles.filterTab} ${
+                          workFilter === "completed"
+                            ? styles.activeFilterTab
+                            : ""
+                        }`}
                         onClick={() => setWorkFilter("completed")}
                       >
                         Завершені ({completedCount})
@@ -909,8 +909,30 @@ const WorkerPortal = () => {
                         {selectedTask.task_name}
                       </div>
 
+                      {/* ОПИС ЗАВДАННЯ ВІД ШІ АБО ЗАГАЛЬНИЙ */}
+                      {selectedTask.notes &&
+                        selectedTask.notes.trim() !== "" && (
+                          <div
+                            style={{
+                              marginTop: "12px",
+                              fontSize: "0.95rem",
+                              color: "#333",
+                              whiteSpace: "pre-wrap",
+                            }}
+                          >
+                            {selectedTask.notes}
+                          </div>
+                        )}
+
+                      {/* НОТАТКА ДЛЯ ПРАЦІВНИКА (РЕДАГУВАННЯ ТА ПЕРЕГЛЯД) */}
                       {isAdminView ? (
-                        <div style={{ marginTop: "16px" }}>
+                        <div
+                          style={{
+                            marginTop: "16px",
+                            borderTop: "1px solid #eee",
+                            paddingTop: "16px",
+                          }}
+                        >
                           <label
                             className={styles.sectionLabel}
                             style={{ color: "#b02a48" }}
@@ -921,11 +943,11 @@ const WorkerPortal = () => {
                             className={styles.textarea}
                             value={adminNote}
                             onChange={(e) => setAdminNote(e.target.value)}
+                            placeholder="Нотатка буде видима працівнику (видаліть весь текст, щоб сховати)..."
                             style={{
                               borderColor: "#b02a48",
                               minHeight: "60px",
                             }}
-                            placeholder="Нотатка буде видима працівнику (видаліть весь текст, щоб сховати)..."
                           />
                           <button
                             onClick={saveAdminNote}
@@ -935,9 +957,12 @@ const WorkerPortal = () => {
                             <FaSave /> Зберегти нотатку
                           </button>
                         </div>
-                      ) : selectedTask.notes &&
-                        selectedTask.notes.trim() !== "" ? (
-                        <div className={styles.managerNoteBox}>
+                      ) : selectedTask.admin_note &&
+                        selectedTask.admin_note.trim() !== "" ? (
+                        <div
+                          className={styles.managerNoteBox}
+                          style={{ marginTop: "16px" }}
+                        >
                           <div className={styles.managerNoteHeader}>
                             <FaInfoCircle /> Нотатка від менеджера:
                           </div>
@@ -947,15 +972,14 @@ const WorkerPortal = () => {
                               lineHeight: "1.5",
                             }}
                           >
-                            {selectedTask.notes}
+                            {selectedTask.admin_note}
                           </div>
                         </div>
                       ) : null}
                     </div>
                   </div>
 
-                  {selectedTask.latestReport &&
-                  !canEditReport(selectedTask.latestReport.report_date) ? (
+                  {isReportApproved ? (
                     <div
                       className={styles.instructionBlock}
                       style={{
@@ -968,11 +992,10 @@ const WorkerPortal = () => {
                         style={{ color: "#166534" }}
                       >
                         <FaCheckDouble className={styles.instructionIcon} />
-                        <h3>Звіт вже відправлено</h3>
+                        <h3>Завдання підтверджено та закрито</h3>
                       </div>
                       <p style={{ fontSize: "0.9rem", color: "#166534" }}>
-                        Час на редагування цього звіту вийшов. Якщо виникла
-                        помилка, зверніться до менеджера.
+                        Менеджер ухвалив цю роботу. Редагування заблоковано.
                       </p>
                       <div
                         style={{
@@ -985,7 +1008,7 @@ const WorkerPortal = () => {
                           fontSize: "0.95rem",
                         }}
                       >
-                        {selectedTask.latestReport.notes}
+                        {selectedTask.latestReport?.notes}
                       </div>
                     </div>
                   ) : (
@@ -1110,7 +1133,71 @@ const WorkerPortal = () => {
                 </div>
               </div>
 
-              <h3 className={styles.subTitle}>Мої документи</h3>
+              {/* БЛОК КЛЮЧІВ ТА ІНСТРУМЕНТІВ */}
+              <div className={styles.profileInfo} style={{ marginTop: "16px" }}>
+                <h3
+                  className={styles.subTitle}
+                  style={{ marginBottom: "12px" }}
+                >
+                  Мій інвентар від компанії
+                </h3>
+                <div style={{ marginBottom: "16px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      color: "#b02a48",
+                      fontWeight: "bold",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    <FaKey /> Ключі та Доступи
+                  </div>
+                  <div
+                    style={{
+                      background: "#fff",
+                      padding: "12px",
+                      borderRadius: "8px",
+                      border: "1px solid #e0e0e0",
+                      whiteSpace: "pre-wrap",
+                      color: "#333",
+                    }}
+                  >
+                    {profile.keys_notes || "Немає виданих ключів"}
+                  </div>
+                </div>
+                <div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      color: "#b02a48",
+                      fontWeight: "bold",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    <FaToolbox /> Інструменти
+                  </div>
+                  <div
+                    style={{
+                      background: "#fff",
+                      padding: "12px",
+                      borderRadius: "8px",
+                      border: "1px solid #e0e0e0",
+                      whiteSpace: "pre-wrap",
+                      color: "#333",
+                    }}
+                  >
+                    {profile.tools_notes || "Немає виданих інструментів"}
+                  </div>
+                </div>
+              </div>
+
+              <h3 className={styles.subTitle} style={{ marginTop: "24px" }}>
+                Мої документи
+              </h3>
               <PhotoUploader
                 label="Додати новий документ"
                 bucketName="worker-documents"
@@ -1190,7 +1277,9 @@ const WorkerPortal = () => {
 
         <div className={styles.bottomNav}>
           <button
-            className={`${styles.navItem} ${activeTab === "work" ? styles.activeNav : ""}`}
+            className={`${styles.navItem} ${
+              activeTab === "work" ? styles.activeNav : ""
+            }`}
             onClick={() => {
               setActiveTab("work");
               setSelectedTask(null);
@@ -1200,14 +1289,18 @@ const WorkerPortal = () => {
             <span>Робота</span>
           </button>
           <button
-            className={`${styles.navItem} ${activeTab === "profile" ? styles.activeNav : ""}`}
+            className={`${styles.navItem} ${
+              activeTab === "profile" ? styles.activeNav : ""
+            }`}
             onClick={() => setActiveTab("profile")}
           >
             <FaUser size={20} />
             <span>Профіль</span>
           </button>
           <button
-            className={`${styles.navItem} ${activeTab === "notifications" ? styles.activeNav : ""}`}
+            className={`${styles.navItem} ${
+              activeTab === "notifications" ? styles.activeNav : ""
+            }`}
             onClick={() => setActiveTab("notifications")}
             style={{ position: "relative" }}
           >

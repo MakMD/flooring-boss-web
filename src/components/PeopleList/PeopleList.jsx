@@ -1,6 +1,7 @@
+// src/components/PeopleList/PeopleList.jsx
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { FaUser, FaPhone, FaSyncAlt } from "react-icons/fa";
+import { FaUser, FaPhone, FaSyncAlt, FaEye } from "react-icons/fa";
 import { MdOutlineChevronRight } from "react-icons/md";
 import styles from "./PeopleList.module.css";
 
@@ -26,7 +27,6 @@ const PeopleList = ({
     setEditedPhones(phonesMap);
   }, [people]);
 
-  // --- ОПТИМІЗАЦІЯ: useCallback для уникнення зайвих перестворень функцій ---
   const handleNameChange = useCallback((id, value) => {
     setEditedNames((prev) => ({ ...prev, [id]: value }));
   }, []);
@@ -124,15 +124,30 @@ const PeopleList = ({
                         <FaUser className={styles.iconGold} />
                         {person.name}
                       </div>
-                      <span
-                        className={`${styles.statusBadge} ${
-                          person.status === "active"
-                            ? styles.active
-                            : styles.inactive
-                        }`}
-                      >
-                        {person.status}
-                      </span>
+
+                      <div className={styles.headerBadges}>
+                        <span
+                          className={`${styles.statusBadge} ${
+                            person.status === "active"
+                              ? styles.active
+                              : styles.inactive
+                          }`}
+                        >
+                          {person.status}
+                        </span>
+
+                        {/* КНОПКА КАБІНЕТУ */}
+                        <button
+                          className={styles.viewAsButton}
+                          onClick={(e) => {
+                            e.stopPropagation(); // щоб не відкривалася загальна сторінка Person
+                            navigate(`/worker-view/${person.id}`);
+                          }}
+                          title="Відкрити кабінет працівника"
+                        >
+                          <FaEye /> Кабінет
+                        </button>
+                      </div>
                     </div>
                     {person.phone && (
                       <div className={styles.cardSubtitle}>

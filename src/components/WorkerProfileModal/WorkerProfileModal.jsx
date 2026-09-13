@@ -10,7 +10,6 @@ import {
 } from "react-icons/fa";
 import styles from "./WorkerProfileModal.module.css";
 
-// ОПТИМІЗАЦІЯ: Чисті функції винесені за межі компонента
 const isImage = (url) => {
   return url && url.match(/\.(jpeg|jpg|gif|png|webp|bmp)$/i) != null;
 };
@@ -22,26 +21,21 @@ const isPdf = (url) => {
 const WorkerProfileModal = ({ personId, personName, onClose }) => {
   const [loading, setLoading] = useState(true);
 
-  // Стан для налаштувань
   const [settings, setSettings] = useState({
     has_gst: false,
     has_wcb: false,
     has_holdback: false,
   });
 
-  // Стан для телефону
   const [phone, setPhone] = useState("");
   const [originalPhone, setOriginalPhone] = useState("");
   const [isSavingPhone, setIsSavingPhone] = useState(false);
 
   const [documents, setDocuments] = useState([]);
-
-  // Стан для перегляду фотографій на весь екран
   const [selectedImage, setSelectedImage] = useState(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    // 1. Отримуємо налаштування робітника
     const { data: personData, error: personError } = await supabase
       .from("people")
       .select("user_id, has_gst, has_wcb, has_holdback, phone")
@@ -64,7 +58,6 @@ const WorkerProfileModal = ({ personId, personName, onClose }) => {
     setPhone(phoneVal);
     setOriginalPhone(phoneVal);
 
-    // 2. Отримуємо документи (через user_id)
     if (personData.user_id) {
       const { data: docs } = await supabase
         .from("worker_documents")
@@ -90,7 +83,7 @@ const WorkerProfileModal = ({ personId, personName, onClose }) => {
 
     if (error) {
       toast.error("Помилка збереження налаштувань.");
-      setSettings((prev) => ({ ...prev, [field]: !newValue })); // відкат
+      setSettings((prev) => ({ ...prev, [field]: !newValue }));
     } else {
       toast.success("Налаштування оновлено!");
     }
@@ -105,7 +98,7 @@ const WorkerProfileModal = ({ personId, personName, onClose }) => {
 
     if (error) {
       toast.error("Помилка збереження телефону.");
-      setPhone(originalPhone); // відкат
+      setPhone(originalPhone);
     } else {
       toast.success("Номер телефону збережено!");
       setOriginalPhone(phone);
@@ -113,7 +106,6 @@ const WorkerProfileModal = ({ personId, personName, onClose }) => {
     setIsSavingPhone(false);
   };
 
-  // ОПТИМІЗАЦІЯ: useCallback для обробника
   const handleDocumentClick = useCallback((e, url) => {
     if (isImage(url)) {
       e.preventDefault();
@@ -142,7 +134,6 @@ const WorkerProfileModal = ({ personId, personName, onClose }) => {
               <p>Завантаження...</p>
             ) : (
               <>
-                {/* КОНТАКТНА ІНФОРМАЦІЯ */}
                 <div>
                   <h3 className={styles.sectionTitle}>Contact Information</h3>
                   <div className={styles.phoneContainer}>
@@ -177,7 +168,6 @@ const WorkerProfileModal = ({ personId, personName, onClose }) => {
                   </p>
                 </div>
 
-                {/* НАЛАШТУВАННЯ */}
                 <div>
                   <h3 className={styles.sectionTitle}>
                     Financial Deductions & Additions
@@ -216,7 +206,6 @@ const WorkerProfileModal = ({ personId, personName, onClose }) => {
                   </div>
                 </div>
 
-                {/* ДОКУМЕНТИ */}
                 <div>
                   <h3 className={styles.sectionTitle}>Uploaded Documents</h3>
                   {documents.length > 0 ? (
@@ -260,7 +249,6 @@ const WorkerProfileModal = ({ personId, personName, onClose }) => {
         </div>
       </div>
 
-      {/* LIGHTBOX ДЛЯ ПЕРЕГЛЯДУ ФОТОГРАФІЙ */}
       {selectedImage && (
         <div
           className={styles.lightboxOverlay}

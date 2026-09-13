@@ -20,6 +20,7 @@ import {
   FaChevronLeft,
   FaChevronRight,
   FaShareAlt,
+  FaDownload,
 } from "react-icons/fa";
 import styles from "./AddressDetailsPage.module.css";
 import commonStyles from "../styles/common.module.css";
@@ -452,7 +453,7 @@ const AddressDetailsPage = () => {
   return (
     <div className={styles.pageContainer}>
       <div className={styles.mobileLayout}>
-        {/* === LIGHTBOX З КНОПКОЮ SHARE === */}
+        {/* === LIGHTBOX З КНОПКАМИ SHARE ТА DOWNLOAD === */}
         {lightboxImages.length > 0 && (
           <div
             className={styles.lightbox}
@@ -465,17 +466,17 @@ const AddressDetailsPage = () => {
                 top: "20px",
                 right: "20px",
                 display: "flex",
-                gap: "16px",
+                gap: "12px",
                 zIndex: 100000,
               }}
             >
-              {/* КНОПКА SHARE */}
+              {/* КНОПКА SHARE / WHATSAPP */}
               <button
                 style={{
-                  background: "rgba(0,0,0,0.5)",
+                  background: "rgba(0,0,0,0.6)",
                   border: "none",
                   color: "white",
-                  fontSize: "1.5rem",
+                  fontSize: "1.2rem",
                   cursor: "pointer",
                   padding: "10px 14px",
                   borderRadius: "8px",
@@ -487,26 +488,86 @@ const AddressDetailsPage = () => {
                 onClick={(e) => {
                   e.stopPropagation();
                   const url = lightboxImages[currentImageIndex];
-                  if (navigator.share) {
+
+                  // Перевірка: якщо телефон - нативне меню, якщо ПК - WhatsApp Web
+                  if (
+                    navigator.share &&
+                    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+                  ) {
                     navigator
-                      .share({
-                        title: "Worker Photo",
-                        url: url,
-                      })
+                      .share({ title: "Worker Photo", url: url })
                       .catch((err) => console.log("Share failed:", err));
                   } else {
-                    toast.error("Share feature not supported on this browser.");
+                    navigator.clipboard
+                      .writeText(url)
+                      .then(() => {
+                        toast.success(
+                          "Посилання скопійовано! Відкриваємо WhatsApp...",
+                        );
+                        window.open(
+                          `https://web.whatsapp.com/send?text=${encodeURIComponent("Фото зі звіту: " + url)}`,
+                          "_blank",
+                        );
+                      })
+                      .catch(() => {
+                        window.open(
+                          `https://web.whatsapp.com/send?text=${encodeURIComponent("Фото зі звіту: " + url)}`,
+                          "_blank",
+                        );
+                      });
                   }
                 }}
-                title="Відправити фото у WhatsApp/Telegram"
+                title="Відправити фото"
               >
                 <FaShareAlt />
               </button>
+
+              {/* КНОПКА ЗАВАНТАЖЕННЯ (DOWNLOAD) */}
+              <a
+                href={lightboxImages[currentImageIndex]}
+                download={`photo_${currentImageIndex}.jpg`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  background: "rgba(0,0,0,0.6)",
+                  border: "none",
+                  color: "white",
+                  fontSize: "1.2rem",
+                  cursor: "pointer",
+                  padding: "10px 14px",
+                  borderRadius: "8px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  transition: "background 0.2s",
+                  textDecoration: "none",
+                }}
+                title="Завантажити фото на ПК"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <FaDownload />
+              </a>
+
               {/* КНОПКА ЗАКРИТТЯ */}
               <button
-                className={styles.closeLightbox}
-                style={{ position: "static" }}
-                onClick={closeLightbox}
+                style={{
+                  background: "rgba(0,0,0,0.6)",
+                  border: "none",
+                  color: "white",
+                  fontSize: "1.2rem",
+                  cursor: "pointer",
+                  padding: "10px 14px",
+                  borderRadius: "8px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  transition: "background 0.2s",
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeLightbox();
+                }}
+                title="Закрити"
               >
                 <FaTimes />
               </button>

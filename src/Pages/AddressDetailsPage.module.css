@@ -286,7 +286,6 @@
   margin: 0;
 }
 
-/* --- ЗВІТИ ПРАЦІВНИКІВ --- */
 .reportsList {
   display: flex;
   flex-direction: column;
@@ -359,7 +358,6 @@
   border-color: var(--color-primary);
 }
 
-/* --- LIGHTBOX --- */
 .lightbox {
   position: fixed;
   top: 0;
@@ -398,7 +396,6 @@
   transform: scale(1.1);
 }
 
-/* --- КНОПКИ НАВІГАЦІЇ LIGHTBOX --- */
 .navBtnLeft,
 .navBtnRight {
   position: absolute;
@@ -444,45 +441,61 @@
   font-size: 1rem;
 }
 
-/* --- Мобільна адаптація --- */
-@media (max-width: 767px) {
+/* =========================================
+   АБСОЛЮТНО ЖОРСТКИЙ ФІКС МАРДЖИНІВ НА МОБІЛЬНИХ 
+   ========================================= */
+@media (max-width: 992px) {
   .pageContainer {
-    padding: 0;
-    width: 100%;
-    margin: 0;
-    box-sizing: border-box;
+    padding: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+    overflow-x: hidden;
   }
+
   .mobileLayout {
-    border-radius: 0;
-    width: 100%;
+    border-radius: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
   }
+
   .header {
-    border-radius: 0;
+    border-radius: 0 !important;
     flex-direction: column;
+    padding: 16px 12px;
   }
+
   .header button {
     width: 100%;
   }
+
   .detailsGrid {
-    padding: 10px;
-    gap: 10px;
+    padding: 0 !important;
+    gap: 8px !important;
+    background-color: #f0f0f0;
   }
+
   .detailCard {
-    border-radius: 0;
-    border-left: none;
-    border-right: none;
-    border-top: none;
-    box-shadow: none;
+    border-radius: 0 !important;
+    border-left: none !important;
+    border-right: none !important;
+    box-shadow: none !important;
+    margin: 0 !important;
   }
+
+  .fullWidthSection {
+    padding: 0 0 20px 0 !important;
+  }
+
   .detailItem {
     grid-template-columns: 1fr;
     gap: 4px;
     align-items: flex-start;
   }
+
   .detailItem label {
     font-size: 0.8rem;
-  }
-  .fullWidthSection {
-    padding: 0 10px 20px 10px;
   }
 }
