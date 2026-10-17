@@ -214,7 +214,8 @@ const WorkerPortal = () => {
             address,
             date,
             is_deleted,
-            builder_id
+            builder_id,
+            ai_translation
           ),
           daily_reports (
             id,
@@ -264,6 +265,7 @@ const WorkerPortal = () => {
             date: taskDate,
             task_name: task.work_type_templates?.name || "Невідома робота",
             notes: task.notes,
+            project_instructions: task.addresses?.ai_translation || "",
             admin_note: task.admin_note,
             builder_name: builder?.name || "Невідомий білдер",
             builder_instructions: builderNotes,
@@ -923,6 +925,16 @@ const WorkerPortal = () => {
                             {selectedTask.notes}
                           </div>
                         )}
+
+                      {selectedTask.project_instructions && (
+                        <details open style={{ marginTop: "16px" }}>
+                          <summary>Інструкції наряду</summary>
+                          <p>Звертайте увагу, до якої роботи належить кожна інструкція.</p>
+                          <div style={{ whiteSpace: "pre-wrap" }}>
+                            {selectedTask.project_instructions}
+                          </div>
+                        </details>
+                      )}
 
                       {/* НОТАТКА ДЛЯ ПРАЦІВНИКА (РЕДАГУВАННЯ ТА ПЕРЕГЛЯД) */}
                       {isAdminView ? (

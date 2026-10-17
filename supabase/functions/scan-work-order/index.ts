@@ -6,7 +6,8 @@
  * (or SUPABASE_PUBLISHABLE_KEY). Requests require a Supabase user access token.
  * Optional: OCR_ALLOWED_USER_ID (restrict to your account), OCR_ALLOWED_ORIGINS
  * (comma-separated exact origins; absent = *), OCR_VERIFY_UNCERTAIN=false.
- * Model intentionally pinned: gpt-4o-2024-08-06.
+ * Default model: gpt-4o-2024-08-06. OCR_MODEL / OCR_VERIFICATION_MODEL are optional overrides.
+ * Overrides must support Chat Completions, temperature, vision and strict JSON Schema; evaluate before deployment.
  *
  * POST { imageBase64: string } OR { imagesBase64: string[] }
  * JPEG/PNG/WebP, raw base64 or data URL. One order per request, up to 10 images.
@@ -27,9 +28,9 @@
  *
  * needs_review=true must be displayed and require confirmation before final save.
  * A false value means checks passed, NOT proof of OCR correctness. No DB writes.
- * Mixed orders/header conflicts return 422, never a silently merged result.
+ * Conflicting orders/headers return 422; missing page identity always requires review.
  * Authentication is checked here even if gateway JWT verification is enabled.
- * Configure persistent per-user rate limits at your gateway if exposed broadly.
+ * Requires the reviewed OCR import migration (admin access + persistent page budget).
  *
  * Instructions linked to a valid source row are classified as work instructions
  * deterministically. Ukrainian translations are checked for flooring terminology,
@@ -59,11 +60,7 @@ export type Unit =
   | "SET"
   | "UNKNOWN";
 type Category =
-  | "material"
-  | "labor"
-  | "accessory"
-  | "miscellaneous"
-  | "unknown";
+  "material" | "labor" | "accessory" | "miscellaneous" | "unknown";
 type Template = "floor_show" | "touchtone" | "unknown";
 type Severity = "review" | "info";
 export interface Issue {
@@ -159,6 +156,8 @@ interface Config {
   supabaseKey: string;
   allowedUser: string;
   verify: boolean;
+  model: string;
+  verificationModel: string;
 }
 interface Schema {
   type: string | string[];
@@ -451,7 +450,10 @@ interface TranslationProblem {
 }
 
 const numberTokens = (s: string): string[] =>
-  (s.match(/\d+(?:[.,]\d+)?/g) ?? []).map((token) => token.replace(",", "."));
+  (s.match(/(?:\d{1,3}(?:,\d{3})+|\d+)(?:[.,]\d+)?/g) ?? []).map((token) => {
+    const value = normalizeNumber(token) ?? Number(token.replace(",", "."));
+    return Number.isFinite(value) ? String(value) : token;
+  });
 
 /** Conservative checks only: each rule reports a review item instead of rewriting text. */
 export function translationProblems(
@@ -480,7 +482,9 @@ export function translationProblems(
   }
   if (
     /\b(?:do\s+not|must\s+not|never|except|no)\b/i.test(original) &&
-    !/(?:\bnot\b|не|ні|крім|окрім|без|заборон)/iu.test(ukrainian)
+    !/(?:^|[^\p{L}])(?:not|не|ні|крім|окрім|без|заборон\p{L}*)(?=$|[^\p{L}])/iu.test(
+      ukrainian,
+    )
   ) {
     add(
       "TRANSLATION_NEGATION",
@@ -835,10 +839,11 @@ export function buildResult(inputs: PageInput[], initialIssues: Issue[] = []) {
     );
   }
   if (inputs.length > 1 && inputs.some((i) => !i.page.order_number.trim())) {
-    fail(
-      422,
+    issue(
+      issues,
       "UNCONFIRMED_PAGE_IDENTITY",
-      "Не вдалося підтвердити номер наряду на кожному фото.",
+      "pages",
+      "Не на кожній сторінці є номер наряду. Підтвердьте вручну, що всі сторінки належать одному замовленню.",
     );
   }
   function header(
@@ -1226,6 +1231,7 @@ export function buildResult(inputs: PageInput[], initialIssues: Issue[] = []) {
     "ROW_CONFLICT",
     "DUPLICATE_LINE_ID",
     "UNCONFIRMED_OVERLAP",
+    "UNCONFIRMED_PAGE_IDENTITY",
     "UNKNOWN_CATEGORY",
     "OCR_UNCERTAINTY",
     "VERIFICATION_DISAGREEMENT",
@@ -1540,6 +1546,11 @@ function getConfig(): Config {
     supabaseKey,
     allowedUser: Deno.env.get("OCR_ALLOWED_USER_ID") ?? "",
     verify: Deno.env.get("OCR_VERIFY_UNCERTAIN") !== "false",
+    model: Deno.env.get("OCR_MODEL") || MODEL,
+    verificationModel:
+      Deno.env.get("OCR_VERIFICATION_MODEL") ||
+      Deno.env.get("OCR_MODEL") ||
+      MODEL,
   };
 }
 async function authenticate(
@@ -1587,6 +1598,29 @@ async function authenticate(
   if (config.allowedUser && user.id !== config.allowedUser) {
     fail(403, "FORBIDDEN", "Користувач не має доступу до OCR.");
   }
+  const roleResponse = await fetch(
+    `${config.supabaseUrl}/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=role`,
+    {
+      headers: { apikey: config.supabaseKey, Authorization: authorization },
+      signal: authSignal,
+    },
+  );
+  if (!roleResponse.ok) {
+    await roleResponse.body?.cancel();
+    fail(503, "AUTH_UNAVAILABLE", "Не вдалося перевірити роль користувача.");
+  }
+  const profiles = parseJson(
+    await readLimited(roleResponse, 16 * 1024, authSignal),
+    502,
+  );
+  if (
+    !Array.isArray(profiles) ||
+    profiles.length !== 1 ||
+    !record(profiles[0]) ||
+    profiles[0].role !== "admin"
+  ) {
+    fail(403, "FORBIDDEN", "Сканувати наряди може лише адміністратор.");
+  }
 }
 async function delay(ms: number, signal: AbortSignal): Promise<void> {
   signal.throwIfAborted();
@@ -1617,7 +1651,7 @@ async function extract(
   focus: string[] = [],
 ): Promise<Page> {
   const payload = JSON.stringify({
-    model: MODEL,
+    model: verification ? config.verificationModel : config.model,
     temperature: 0,
     max_completion_tokens: 8000,
     response_format: {
@@ -1760,20 +1794,96 @@ async function mapConcurrent<T, R>(
   );
   return results;
 }
-function verificationSignature(p: Page): string {
-  // Exact OCR facts must agree. Translation wording may vary, so compare its
-  // deterministic risk profile instead of requiring identical Ukrainian prose.
-  const { uncertainties: _uncertainties, instructions, ...facts } = p;
-  return JSON.stringify({
-    ...facts,
-    instructions: instructions.map(({ ukrainian, ...note }) => ({
-      ...note,
-      translation_problems: translationProblems(note.original, ukrainian)
+export function verificationFacts(p: Page) {
+  const numeric = (value: string) => normalizeNumber(value) ?? trim(value);
+  return {
+    order_number: key(p.order_number),
+    builder_name: key(p.builder_name),
+    store_name: key(p.store_name),
+    address: key(p.address),
+    document_type: p.document_type,
+    install_date: parseInstallDates(
+      p.install_date_raw,
+      p.date_format,
+      p.date_source,
+    ),
+    install_date_raw: key(p.install_date_raw),
+    labor_total: numeric(p.labor_total_raw),
+    labor_total_scope: p.labor_total_scope,
+    page_number: p.page_number,
+    page_count: p.page_count,
+    full_page_visible: p.full_page_visible,
+    all_rows_readable: p.all_rows_readable,
+    rows: p.rows.map((row) => ({
+      line: trim(row.printed_line_id),
+      name: key(row.name),
+      description: key(row.description),
+      category: row.category,
+      area: key(row.area),
+      quantity: numeric(row.quantity_raw),
+      unit: normalizeUnit(row.unit_raw),
+      unit_raw:
+        normalizeUnit(row.unit_raw) === "UNKNOWN" ? key(row.unit_raw) : "",
+      rate: numeric(row.rate_raw),
+      amount: numeric(row.amount_raw),
+    })),
+    instructions: p.instructions.map((note) => ({
+      row_index: note.row_index,
+      original: key(note.original),
+      scope: note.scope,
+      translation_problems: translationProblems(note.original, note.ukrainian)
         .map((problem) => problem.code)
         .sort(),
     })),
-  });
+  };
 }
+
+export function verificationDifferences(first: Page, second: Page): string[] {
+  const a = verificationFacts(first),
+    b = verificationFacts(second);
+  return Object.keys(a).filter(
+    (field) =>
+      JSON.stringify(a[field as keyof typeof a]) !==
+      JSON.stringify(b[field as keyof typeof b]),
+  );
+}
+
+async function consumeBudget(
+  req: Request,
+  config: Config,
+  pages: number,
+  signal: AbortSignal,
+) {
+  const response = await fetch(
+    `${config.supabaseUrl}/rest/v1/rpc/consume_ocr_budget`,
+    {
+      method: "POST",
+      headers: {
+        apikey: config.supabaseKey,
+        Authorization: req.headers.get("authorization")!,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ p_pages: pages }),
+      signal,
+    },
+  );
+  if (!response.ok) {
+    await response.body?.cancel();
+    fail(
+      503,
+      "OCR_BUDGET_UNAVAILABLE",
+      "Контроль ліміту OCR недоступний. Перевірте міграцію бази даних.",
+    );
+  }
+  const allowed = parseJson(await readLimited(response, 1024, signal), 502);
+  if (allowed !== true)
+    fail(
+      429,
+      "OCR_BUDGET_EXCEEDED",
+      "Перевищено погодинний ліміт сканування. Спробуйте пізніше.",
+    );
+}
+
 export async function handler(req: Request): Promise<Response> {
   const requestId = crypto.randomUUID(),
     started = Date.now();
@@ -1849,6 +1959,12 @@ export async function handler(req: Request): Promise<Response> {
     await authenticate(req, config, signal);
     const body = parseJson(await readLimited(req, LIMITS.body, signal), 400);
     const images = await prepareImages(body);
+    await consumeBudget(
+      req,
+      config,
+      images.length + (config.verify ? 1 : 0),
+      signal,
+    );
     const pages = await mapConcurrent(images, 2, async (image) => ({
       image: image.index,
       page: await extract(image, config, signal, usage),
@@ -1895,16 +2011,14 @@ export async function handler(req: Request): Promise<Response> {
               .slice(0, 12)
               .map((i) => `${i.code}:${i.path}`),
           );
-          if (
-            verificationSignature(candidate.page) !==
-            verificationSignature(second)
-          ) {
+          const differences = verificationDifferences(candidate.page, second);
+          if (differences.length > 0) {
             usage.verification = "disagreed";
             issue(
               extraIssues,
               "VERIFICATION_DISAGREEMENT",
               `images.${candidate.image}`,
-              "Повторне читання відрізняється. Перше збережено; потрібна ручна перевірка фото.",
+              `Повторне читання відрізняється у полях: ${differences.join(", ")}. Перше збережено; звірте ці поля з фото.`,
             );
           } else usage.verification = "agreed";
         } catch {
@@ -1932,7 +2046,9 @@ export async function handler(req: Request): Promise<Response> {
       ...result,
       metadata: {
         request_id: requestId,
-        model: MODEL,
+        model: config.model,
+        verification_model: config.verificationModel,
+        prompt_version: "4.1",
         images_processed: images.length,
         duration_ms: Date.now() - started,
         ...usage,

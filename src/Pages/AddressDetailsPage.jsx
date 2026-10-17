@@ -29,6 +29,7 @@ import { useAdminLists } from "../hooks/useAdminLists";
 import WorkTypesManager from "../components/WorkTypesManager/WorkTypesManager";
 import MaterialsManager from "../components/MaterialsManager/MaterialsManager";
 
+import ImportedScanDetails from "../components/OcrReview/ImportedScanDetails";
 import StorageMedia from "../components/StorageMedia/StorageMedia";
 import {
   isImageFile as isImage,
@@ -1226,6 +1227,7 @@ const AddressDetailsPage = () => {
           </div>
         </div>
 
+        <ImportedScanDetails scan={addressData.ai_scan} />
         <div className={styles.fullWidthSection}>
           <div className={styles.detailCard}>
             <h3>Work Types & Payments</h3>

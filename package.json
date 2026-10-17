@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test tests/*.test.js"
   },
   "dependencies": {
     "@redux-devtools/extension": "^3.3.0",
@@ -19,6 +20,7 @@
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
     "nanoid": "^5.0.7",
+    "pdfjs-dist": "5.4.624",
     "react": "^18.2.0",
     "react-datepicker": "^9.1.0",
     "react-dom": "^18.2.0",
@@ -28,6 +30,7 @@
     "yup": "^1.4.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.3.14",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
     "@vitejs/plugin-react": "^4.2.1",

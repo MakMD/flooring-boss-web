@@ -1,0 +1,56 @@
+.review {
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  margin-top: 16px;
+  color: var(--color-text-primary);
+  background: var(--color-background);
+  overflow-wrap: anywhere;
+}
+.row {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  min-height: 42px;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-background);
+  color: var(--color-text-primary);
+}
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 0;
+}
+.check input {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+.warnings {
+  border-left: 4px solid #b7791f;
+  padding: 12px;
+  background: rgb(183 121 31 / 10%);
+}
+.review summary {
+  cursor: pointer;
+  padding: 10px 0;
+}

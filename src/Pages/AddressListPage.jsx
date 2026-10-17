@@ -38,6 +38,12 @@ import {
 import { Formik, Form, Field, ErrorMessage } from "formik";
 import * as Yup from "yup";
 
+import OcrReview from "../components/OcrReview/OcrReview";
+import ScanFilePreview from "../components/OcrReview/ScanFilePreview";
+import StorageMedia from "../components/StorageMedia/StorageMedia";
+import { scanFormValues, validateReviewedImport } from "../utils/ocrImport";
+import { validateScanFiles } from "../utils/scanDocuments";
+import { scanDocuments, uploadScanOriginals } from "../services/ocrService";
 import AssignedWorkers from "../components/AssignedWorkers/AssignedWorkers";
 import { useAuth } from "../contexts/AuthContext";
 import {
@@ -65,32 +71,6 @@ const AddProjectSchema = Yup.object().shape({
   builder_id: Yup.number().nullable(),
 });
 
-const normalizeText = (text) => {
-  if (!text) return "";
-  return text
-    .toLowerCase()
-    .replace(/the\s|ltd\.?|inc\.?|corp\.?|canada/g, "")
-    .replace(/[^a-z0-9]/g, "");
-};
-
-const isMatch = (dbName, aiName) => {
-  const cleanDb = normalizeText(dbName);
-  const cleanAi = normalizeText(aiName);
-  if (!cleanDb || !cleanAi) return false;
-  if (cleanDb.includes(cleanAi) || cleanAi.includes(cleanDb)) return true;
-  if (
-    (cleanDb.includes("touchstone") && cleanAi.includes("touchtone")) ||
-    (cleanAi.includes("touchstone") && cleanDb.includes("touchtone"))
-  )
-    return true;
-  if (
-    (cleanDb.includes("showfloor") && cleanAi.includes("floorshow")) ||
-    (cleanAi.includes("showfloor") && cleanDb.includes("floorshow"))
-  )
-    return true;
-  return false;
-};
-
 const AddressListPage = () => {
   const { user } = useAuth();
   const storageKey = `projects-view:${user.id}`;
@@ -107,7 +87,7 @@ const AddressListPage = () => {
     savedView.projectTab || "Address",
   );
 
-  const { builders, stores, products } = useAdminLists();
+  const { builders, stores, products, workTypeTemplates } = useAdminLists();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -137,6 +117,17 @@ const AddressListPage = () => {
   const [isAddFormOpen, setIsAddFormOpen] = useState(false);
 
   const [isScanning, setIsScanning] = useState(false);
+  const [scanSelectionChanged, setScanSelectionChanged] = useState(false);
+  const scanController = useRef(null);
+  const scanCache = useRef(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      scanController.current?.abort();
+    };
+  }, []);
   const [selectedFilesToScan, setSelectedFilesToScan] = useState([]);
 
   const [duplicateWarning, setDuplicateWarning] = useState(null);
@@ -243,7 +234,7 @@ const AddressListPage = () => {
     restoring.current = false;
   }, [addressesLoading, addresses]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const save = () =>
       writeProjectListState(storageKey, {
         searchTerm,
@@ -290,8 +281,10 @@ const AddressListPage = () => {
   };
 
   const toggleAddForm = () => {
+    if (isScanning) return;
     if (isAddFormOpen) {
       setSelectedFilesToScan([]);
+      setScanSelectionChanged(false);
       setDuplicateWarning(null);
     }
     setIsAddFormOpen(!isAddFormOpen);
@@ -361,6 +354,18 @@ const AddressListPage = () => {
   }, [addresses]);
 
   const saveProjectToDatabase = async (values, setSubmitting, resetForm) => {
+    if (isScanning || (values.ocr_result && scanSelectionChanged)) {
+      toast.error("Finish scanning the selected documents before saving.");
+      setSubmitting(false);
+      return;
+    }
+    try {
+      validateReviewedImport(values);
+    } catch (error) {
+      toast.error(error.message);
+      setSubmitting(false);
+      return;
+    }
     const combinedFiles = [
       ...(values.scanned_files_array || []),
       ...(values.additional_photo_url ? [values.additional_photo_url] : []),
@@ -373,9 +378,10 @@ const AddressListPage = () => {
       work_order_number: values.work_order_number?.trim() || null,
       address: values.address.trim(),
       date: values.date,
-      total_amount: values.total_amount
-        ? parseFloat(values.total_amount)
-        : null,
+      total_amount:
+        values.total_amount === "" || values.total_amount == null
+          ? null
+          : Number(values.total_amount),
       store_id: values.store_id ? parseInt(values.store_id) : null,
       builder_id: values.builder_id ? parseInt(values.builder_id) : null,
       status: "In Process",
@@ -387,7 +393,41 @@ const AddressListPage = () => {
       files: combinedFiles,
     };
 
-    const { data: newAddressData, error: addressError } = await supabase
+    if (values.ocr_result) {
+      const scan = {
+        original: values.ocr_result,
+        reviewed_rows: values.pending_work_types,
+        reviewed: true,
+        date_end: values.date_end || null,
+      };
+      const { error } = await supabase.rpc("import_reviewed_work_order", {
+        p_project: newAddressObject,
+        p_scan: scan,
+        p_import_key: values.ocr_import_key,
+        p_allow_duplicate: Boolean(values.allow_duplicate),
+      });
+      if (error) {
+        toast.error(
+          error.code === "PGRST202"
+            ? "Scan import is not installed yet. Apply the OCR database migration before saving."
+            : error.message,
+        );
+        setSubmitting(false);
+        return;
+      }
+      toast.success("Reviewed project and work items saved together.");
+      resetForm();
+      setIsAddFormOpen(false);
+      setSelectedFilesToScan([]);
+      setScanSelectionChanged(false);
+      setDuplicateWarning(null);
+      scanCache.current = null;
+      refetch();
+      setSubmitting(false);
+      return;
+    }
+
+    const { error: addressError } = await supabase
       .from("addresses")
       .insert([newAddressObject])
       .select()
@@ -399,80 +439,7 @@ const AddressListPage = () => {
       return;
     }
 
-    if (values.pending_work_types && values.pending_work_types.length > 0) {
-      let addedCount = 0;
-
-      for (const wt of values.pending_work_types) {
-        let templateId = null;
-
-        const rawName =
-          wt.name ||
-          wt.product_name ||
-          wt.description ||
-          wt.item ||
-          "Unknown Work";
-        const cleanName = rawName.trim();
-
-        const { data: existingTpl } = await supabase
-          .from("work_type_templates")
-          .select("id")
-          .ilike("name", cleanName)
-          .maybeSingle();
-
-        if (existingTpl) {
-          templateId = existingTpl.id;
-        } else {
-          const { data: newTpl, error: newTplError } = await supabase
-            .from("work_type_templates")
-            .insert([{ name: cleanName }])
-            .select()
-            .single();
-
-          if (newTplError) {
-            console.error("DB Error creating template:", newTplError);
-            toast.error(`❌ Couldn't create work type "${cleanName}".`);
-          } else if (newTpl) {
-            templateId = newTpl.id;
-          }
-        }
-
-        if (templateId) {
-          const rawAmt =
-            wt.amount !== undefined
-              ? wt.amount
-              : wt.price || wt.sq_ft || wt.total;
-          let parsedAmt = null;
-
-          if (rawAmt !== undefined && rawAmt !== null) {
-            const cleaned = String(rawAmt).replace(/[^0-9.-]+/g, "");
-            if (cleaned !== "") parsedAmt = parseFloat(cleaned);
-          }
-
-          const { error: wtError } = await supabase.from("work_types").insert([
-            {
-              address_id: newAddressData.id,
-              work_type_template_id: templateId,
-              payment_amount: parsedAmt,
-              person_id: null,
-              notes: wt.notes || wt.line_notes || null,
-            },
-          ]);
-
-          if (wtError) {
-            console.error("DB Error linking work type:", wtError);
-            toast.error(`❌ Couldn't link "${cleanName}" to project.`);
-          } else {
-            addedCount++;
-          }
-        }
-      }
-
-      if (addedCount > 0) {
-        toast.success(`✅ Successfully attached ${addedCount} work items!`);
-      }
-    } else {
-      toast.success("Project created successfully!");
-    }
+    toast.success("Project created successfully!");
 
     resetForm();
     setIsAddFormOpen(false);
@@ -537,132 +504,71 @@ const AddressListPage = () => {
   };
 
   const handleFilesSelected = (event) => {
-    const files = Array.from(event.target.files);
-    if (files.length === 0) return;
-    setSelectedFilesToScan((prev) => [...prev, ...files]);
+    if (isScanning) return;
+    const next = [...selectedFilesToScan, ...Array.from(event.target.files)];
     event.target.value = null;
+    try {
+      validateScanFiles(next);
+    } catch (error) {
+      toast.error(error.message);
+      return;
+    }
+    setSelectedFilesToScan(next);
+    if (scanCache.current) setScanSelectionChanged(true);
   };
 
   const handleRemoveFile = (index) => {
-    setSelectedFilesToScan((prev) => prev.filter((_, i) => i !== index));
+    if (!isScanning) {
+      setSelectedFilesToScan((prev) => prev.filter((_, i) => i !== index));
+      if (scanCache.current) setScanSelectionChanged(true);
+    }
   };
 
-  const handleRunScan = async (setFieldValue) => {
-    if (selectedFilesToScan.length === 0) return;
-
+  const handleRunScan = async (setValues) => {
+    if (scanController.current || selectedFilesToScan.length === 0) return;
+    const controller = new AbortController();
+    scanController.current = controller;
     setIsScanning(true);
     const toastId = toast.loading(
-      `Uploading & analyzing ${selectedFilesToScan.length} document(s)...`,
+      "Reading documents. Your previous result is kept until this scan succeeds.",
+      { id: "work-order-scan" },
     );
-
     try {
-      const imagesBase64 = [];
-      const uploadedFilePaths = [];
-
-      for (let i = 0; i < selectedFilesToScan.length; i++) {
-        const file = selectedFilesToScan[i];
-        const fileExt = file.name.split(".").pop();
-        const fileName = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from("original-photos")
-          .upload(fileName, file);
-
-        if (uploadError) {
-          throw new Error("Failed to upload photo: " + uploadError.message);
-        }
-
-        const { data: publicUrlData } = supabase.storage
-          .from("original-photos")
-          .getPublicUrl(fileName);
-
-        uploadedFilePaths.push(publicUrlData.publicUrl);
-
-        if (i === 0) {
-          setFieldValue("original_photo_url", publicUrlData.publicUrl);
-        }
-
-        const base64 = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.readAsDataURL(file);
-          reader.onload = () => resolve(reader.result.split(",")[1]);
-          reader.onerror = (error) => reject(error);
-        });
-
-        imagesBase64.push(base64);
-      }
-
-      setFieldValue("scanned_files_array", uploadedFilePaths);
-
-      const { data, error } = await supabase.functions.invoke(
-        "scan-work-order",
-        { body: { imagesBase64 } },
+      const files = [...selectedFilesToScan];
+      const sameFiles =
+        scanCache.current?.files.length === files.length &&
+        files.every((file, i) => file === scanCache.current.files[i]);
+      const result = sameFiles
+        ? scanCache.current.result
+        : await scanDocuments(files, controller.signal);
+      if (!sameFiles) scanCache.current = { files, result, urls: null };
+      const urls =
+        scanCache.current.urls ||
+        (await uploadScanOriginals(files, user.id, controller.signal));
+      controller.signal.throwIfAborted();
+      scanCache.current = { files, result, urls };
+      await setValues((previous) => ({
+        ...previous,
+        ...scanFormValues(result, { builders, stores, workTypeTemplates }),
+        original_photo_url: urls[0] || "",
+        scanned_files_array: urls,
+        ocr_import_key: sameFiles
+          ? previous.ocr_import_key || crypto.randomUUID()
+          : crypto.randomUUID(),
+      }));
+      setScanSelectionChanged(false);
+      toast.success(
+        "Scan ready. Review every finding and confirm before saving.",
+        { id: toastId },
       );
-
-      if (error) throw new Error(error.message || "Помилка зв'язку з сервером");
-      if (data && data.error) throw new Error(data.error);
-
-      if (data.work_order_number)
-        setFieldValue("work_order_number", data.work_order_number);
-
-      // Запобіжник для форми: якщо ШІ повертає брєд (не Service і не Address), ставимо Address
-      if (data.type) {
-        const safeType = data.type === "Service" ? "Service" : "Address";
-        setFieldValue("project_type", safeType);
-      }
-
-      if (data.address) setFieldValue("address", data.address);
-      if (data.date) setFieldValue("date", data.date);
-      if (data.total_amount) setFieldValue("total_amount", data.total_amount);
-
-      const translationText =
-        data.ai_translation || data.instructions || data.notes || "";
-      setFieldValue("ai_translation", translationText);
-
-      let extractedWorks = [];
-      if (data.work_types && Array.isArray(data.work_types)) {
-        extractedWorks = data.work_types;
-      } else if (data.work_orders && Array.isArray(data.work_orders)) {
-        extractedWorks = data.work_orders;
-      } else if (data.items && Array.isArray(data.items)) {
-        extractedWorks = data.items;
-      }
-
-      if (extractedWorks.length > 0) {
-        const processedWorks = extractedWorks.map((wt) => ({
-          ...wt,
-          notes: wt.line_notes || wt.notes || "",
-        }));
-
-        setFieldValue("pending_work_types", processedWorks);
-        toast.success(
-          `Found ${extractedWorks.length} work items across all pages!`,
-          {
-            id: toastId,
-          },
-        );
-      } else {
-        toast.success("Documents analyzed successfully!", { id: toastId });
-      }
-
-      if (data.builder_name && builders) {
-        const matchedBuilder = builders.find((b) =>
-          isMatch(b.name, data.builder_name),
-        );
-        if (matchedBuilder) setFieldValue("builder_id", matchedBuilder.id);
-      }
-
-      if (data.store_name && stores) {
-        const matchedStore = stores.find((s) =>
-          isMatch(s.name, data.store_name),
-        );
-        if (matchedStore) setFieldValue("store_id", matchedStore.id);
-      }
     } catch (error) {
-      console.error("Full Scanning error:", error);
-      toast.error(`Scan failed: ${error.message}`, { id: toastId });
+      toast.error(
+        error.name === "AbortError" ? "Scan cancelled." : error.message,
+        { id: toastId },
+      );
     } finally {
-      setIsScanning(false);
+      scanController.current = null;
+      if (mounted.current) setIsScanning(false);
     }
   };
 
@@ -846,6 +752,7 @@ const AddressListPage = () => {
           <div style={{ display: "flex", gap: "8px" }}>
             <button
               onClick={toggleAddForm}
+              disabled={isScanning}
               className={commonStyles.buttonPrimary}
             >
               {isAddFormOpen ? <FaTimes /> : <FaPlus />}{" "}
@@ -1012,7 +919,10 @@ const AddressListPage = () => {
                   className={commonStyles.buttonSecondary}
                   onClick={() => {
                     saveProjectToDatabase(
-                      duplicateWarning.valuesToSave,
+                      {
+                        ...duplicateWarning.valuesToSave,
+                        allow_duplicate: true,
+                      },
                       duplicateWarning.setSubmittingFunc,
                       duplicateWarning.resetFormFunc,
                     );
@@ -1051,351 +961,383 @@ const AddressListPage = () => {
                 additional_photo_url: "",
                 scanned_files_array: [],
                 pending_work_types: [],
+                ocr_result: null,
+                ocr_reviewed: false,
+                ocr_import_key: "",
+                date_end: "",
               }}
               validationSchema={AddProjectSchema}
               onSubmit={handleAddAddress}
             >
-              {({ isSubmitting, values, setFieldValue }) => (
-                <Form className={styles.addForm}>
-                  <div className={styles.formRow}>
-                    <div className={styles.inputGroup}>
-                      <label>Type</label>
-                      <Field
-                        as="select"
-                        name="project_type"
-                        className={styles.formInput}
-                      >
-                        <option value="Address">Address</option>
-                        <option value="Service">Service</option>
-                      </Field>
-                    </div>
-                    <div className={styles.inputGroup}>
-                      <label>WO Number</label>
-                      <Field
-                        type="text"
-                        name="work_order_number"
-                        placeholder="e.g. 47174-1"
-                        className={styles.formInput}
-                      />
-                    </div>
-                    <div className={styles.inputGroup}>
-                      <label>Builder</label>
-                      <Field
-                        as="select"
-                        name="builder_id"
-                        className={styles.formInput}
-                      >
-                        <option value="">Select Builder</option>
-                        {builders?.map((b) => (
-                          <option key={b.id} value={b.id}>
-                            {b.name}
-                          </option>
-                        ))}
-                      </Field>
-                    </div>
-                    <div className={styles.inputGroup}>
-                      <label>Store</label>
-                      <Field
-                        as="select"
-                        name="store_id"
-                        className={styles.formInput}
-                      >
-                        <option value="">Select Store</option>
-                        {stores?.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.name}
-                          </option>
-                        ))}
-                      </Field>
-                    </div>
-                  </div>
-                  <div className={styles.formRow}>
-                    <div className={styles.inputGroup}>
-                      <label>Address / Service Name</label>
-                      <Field
-                        type="text"
-                        name="address"
-                        placeholder="Job site address or service name"
-                        className={styles.formInput}
-                      />
-                      <ErrorMessage
-                        name="address"
-                        component="div"
-                        className={styles.errorMessage}
-                      />
-                    </div>
-                    <div className={styles.inputGroup}>
-                      <label>Date</label>
-                      <Field
-                        type="date"
-                        name="date"
-                        className={styles.formInput}
-                      />
-                    </div>
-                    {values.project_type === "Service" && (
+              {({ isSubmitting, values, setFieldValue, setValues }) => (
+                <Form
+                  className={styles.addForm}
+                  onChangeCapture={(event) => {
+                    if (values.ocr_reviewed && event.target.type !== "checkbox")
+                      setFieldValue("ocr_reviewed", false);
+                  }}
+                >
+                  <fieldset
+                    disabled={isScanning || isSubmitting}
+                    style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}
+                  >
+                    <div className={styles.formRow}>
                       <div className={styles.inputGroup}>
-                        <label>Time</label>
+                        <label>Type</label>
                         <Field
-                          type="time"
-                          name="time"
+                          as="select"
+                          name="project_type"
+                          className={styles.formInput}
+                        >
+                          <option value="">Select type</option>
+                          <option value="Address">Address</option>
+                          <option value="Service">Service</option>
+                        </Field>
+                        <ErrorMessage name="project_type" component="div" className={styles.errorMessage} />
+                      </div>
+                      <div className={styles.inputGroup}>
+                        <label>WO Number</label>
+                        <Field
+                          type="text"
+                          name="work_order_number"
+                          placeholder="e.g. 47174-1"
                           className={styles.formInput}
                         />
                       </div>
-                    )}
-                  </div>
-
-                  <div className={styles.formRow}>
-                    <div
-                      className={styles.inputGroup}
-                      style={{ width: "100%" }}
-                    >
-                      <label>Total Amount</label>
-                      <Field
-                        type="number"
-                        name="total_amount"
-                        placeholder="0.00"
-                        className={styles.formInput}
-                        style={{ width: "100%" }}
-                      />
-                    </div>
-                  </div>
-
-                  <div
-                    className={styles.inputGroup}
-                    style={{ marginTop: "8px" }}
-                  >
-                    <label>AI Instructions / Notes</label>
-                    <Field
-                      as="textarea"
-                      name="ai_translation"
-                      placeholder="AI will put translation and instructions here..."
-                      className={styles.formInput}
-                      style={{ minHeight: "80px", resize: "vertical" }}
-                    />
-                  </div>
-
-                  <div
-                    className={styles.inputGroup}
-                    style={{ marginTop: "10px" }}
-                  >
-                    <label>
-                      Scan Documents (Select 1 or more photos as Originals)
-                    </label>
-
-                    <input
-                      type="file"
-                      id="multiCameraInput"
-                      multiple
-                      accept="image/*, application/pdf"
-                      style={{ display: "none" }}
-                      onChange={handleFilesSelected}
-                    />
-
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: "10px",
-                        flexWrap: "wrap",
-                        alignItems: "center",
-                      }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() =>
-                          document.getElementById("multiCameraInput").click()
-                        }
-                        className={commonStyles.buttonSecondary}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "6px",
-                        }}
-                      >
-                        <FaPlus /> Додати фото до сканування
-                      </button>
-
-                      {selectedFilesToScan.length > 0 && (
-                        <button
-                          type="button"
-                          disabled={isScanning}
-                          onClick={() => handleRunScan(setFieldValue)}
-                          className={commonStyles.buttonPrimary}
-                          style={{ backgroundColor: "#10b981", color: "#fff" }}
+                      <div className={styles.inputGroup}>
+                        <label>Builder</label>
+                        <Field
+                          as="select"
+                          name="builder_id"
+                          className={styles.formInput}
                         >
-                          {isScanning
-                            ? "Scanning..."
-                            : `🚀 Запустити сканування (${selectedFilesToScan.length})`}
-                        </button>
+                          <option value="">Select Builder</option>
+                          {builders?.map((b) => (
+                            <option key={b.id} value={b.id}>
+                              {b.name}
+                            </option>
+                          ))}
+                        </Field>
+                      </div>
+                      <div className={styles.inputGroup}>
+                        <label>Store</label>
+                        <Field
+                          as="select"
+                          name="store_id"
+                          className={styles.formInput}
+                        >
+                          <option value="">Select Store</option>
+                          {stores?.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.name}
+                            </option>
+                          ))}
+                        </Field>
+                      </div>
+                    </div>
+                    <div className={styles.formRow}>
+                      <div className={styles.inputGroup}>
+                        <label>Address / Service Name</label>
+                        <Field
+                          type="text"
+                          name="address"
+                          placeholder="Job site address or service name"
+                          className={styles.formInput}
+                        />
+                        <ErrorMessage
+                          name="address"
+                          component="div"
+                          className={styles.errorMessage}
+                        />
+                      </div>
+                      <div className={styles.inputGroup}>
+                        <label>Date</label>
+                        <Field
+                          type="date"
+                          name="date"
+                          className={styles.formInput}
+                        />
+                        <ErrorMessage name="date" component="div" className={styles.errorMessage} />
+                      </div>
+                      {values.project_type === "Service" && (
+                        <div className={styles.inputGroup}>
+                          <label>Time</label>
+                          <Field
+                            type="time"
+                            name="time"
+                            className={styles.formInput}
+                          />
+                        <ErrorMessage name="time" component="div" className={styles.errorMessage} />
+                        </div>
                       )}
                     </div>
 
-                    {selectedFilesToScan.length > 0 && (
+                    <div className={styles.formRow}>
+                      <div
+                        className={styles.inputGroup}
+                        style={{ width: "100%" }}
+                      >
+                        <label>Total Amount</label>
+                        <Field
+                          type="number"
+                          name="total_amount"
+                          placeholder="0.00"
+                          className={styles.formInput}
+                          style={{ width: "100%" }}
+                        />
+                        <ErrorMessage name="total_amount" component="div" className={styles.errorMessage} />
+                      </div>
+                    </div>
+
+                    <div
+                      className={styles.inputGroup}
+                      style={{ marginTop: "8px" }}
+                    >
+                      <label>AI Instructions / Notes</label>
+                      <Field
+                        as="textarea"
+                        name="ai_translation"
+                        placeholder="AI will put translation and instructions here..."
+                        className={styles.formInput}
+                        style={{ minHeight: "80px", resize: "vertical" }}
+                      />
+                    </div>
+
+                    <div
+                      className={styles.inputGroup}
+                      style={{ marginTop: "10px" }}
+                    >
+                      <label>
+                        Scan Documents (Select 1 or more photos as Originals)
+                      </label>
+
+                      <input
+                        type="file"
+                        id="multiCameraInput"
+                        multiple
+                        accept="image/jpeg,image/png,image/webp,application/pdf"
+                        style={{ display: "none" }}
+                        onChange={handleFilesSelected}
+                      />
+
                       <div
                         style={{
                           display: "flex",
                           gap: "10px",
                           flexWrap: "wrap",
-                          marginTop: "10px",
+                          alignItems: "center",
                         }}
                       >
-                        {selectedFilesToScan.map((file, idx) => (
-                          <div
-                            key={idx}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            document.getElementById("multiCameraInput").click()
+                          }
+                          className={commonStyles.buttonSecondary}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
+                          }}
+                        >
+                          <FaPlus /> Додати фото до сканування
+                        </button>
+
+                        {selectedFilesToScan.length > 0 && (
+                          <button
+                            type="button"
+                            disabled={isScanning}
+                            onClick={() => handleRunScan(setValues)}
+                            className={commonStyles.buttonPrimary}
                             style={{
-                              position: "relative",
-                              width: "80px",
-                              height: "80px",
-                              border: "1px solid #ccc",
-                              borderRadius: "6px",
-                              overflow: "hidden",
-                              background: "#f3f4f6",
+                              backgroundColor: "#10b981",
+                              color: "#fff",
                             }}
                           >
-                            <img
-                              src={URL.createObjectURL(file)}
-                              alt="preview"
-                              style={{
-                                width: "100%",
-                                height: "100%",
-                                objectFit: "cover",
-                              }}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveFile(idx)}
-                              style={{
-                                position: "absolute",
-                                top: "2px",
-                                right: "2px",
-                                background: "rgba(0,0,0,0.6)",
-                                color: "#fff",
-                                border: "none",
-                                borderRadius: "50%",
-                                width: "20px",
-                                height: "20px",
-                                fontSize: "10px",
-                                cursor: "pointer",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                              }}
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        ))}
+                            {isScanning
+                              ? "Scanning..."
+                              : `🚀 Запустити сканування (${selectedFilesToScan.length})`}
+                          </button>
+                        )}
                       </div>
-                    )}
-                  </div>
 
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "10px",
-                      marginTop: "10px",
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    {values.scanned_files_array &&
-                    values.scanned_files_array.length > 0 ? (
-                      <div
-                        className={styles.inputGroup}
-                        style={{ width: "100%" }}
-                      >
-                        <label>
-                          Original Scanned Documents (
-                          {values.scanned_files_array.length})
-                        </label>
+                      {selectedFilesToScan.length > 0 && (
                         <div
                           style={{
                             display: "flex",
                             gap: "10px",
                             flexWrap: "wrap",
-                            marginTop: "8px",
+                            marginTop: "10px",
                           }}
                         >
-                          {values.scanned_files_array.map((url, idx) => (
-                            <img
+                          {selectedFilesToScan.map((file, idx) => (
+                            <div
                               key={idx}
-                              src={url}
-                              alt={`Original Scanned ${idx + 1}`}
                               style={{
-                                height: "120px",
-                                width: "120px",
-                                objectFit: "cover",
-                                borderRadius: "8px",
-                                border: "1px solid var(--color-border)",
-                                backgroundColor: "#fff",
+                                position: "relative",
+                                width: "80px",
+                                height: "80px",
+                                border: "1px solid #ccc",
+                                borderRadius: "6px",
+                                overflow: "hidden",
+                                background: "#f3f4f6",
                               }}
-                            />
+                            >
+                              <ScanFilePreview file={file} />
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveFile(idx)}
+                                style={{
+                                  position: "absolute",
+                                  top: "2px",
+                                  right: "2px",
+                                  background: "rgba(0,0,0,0.6)",
+                                  color: "#fff",
+                                  border: "none",
+                                  borderRadius: "50%",
+                                  width: "20px",
+                                  height: "20px",
+                                  fontSize: "10px",
+                                  cursor: "pointer",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                }}
+                              >
+                                ✕
+                              </button>
+                            </div>
                           ))}
                         </div>
-                      </div>
-                    ) : values.original_photo_url ? (
-                      <div className={styles.inputGroup} style={{ flex: 1 }}>
-                        <label>Original Document</label>
-                        <img
-                          src={values.original_photo_url}
-                          alt="Scanned Document"
-                          className={styles.previewImageDoc}
-                        />
-                      </div>
-                    ) : null}
-                  </div>
+                      )}
+                    </div>
 
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "12px",
-                      marginTop: "16px",
-                      width: "100%",
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <input
-                      type="file"
-                      id="additionalPhotoInput"
-                      accept="image/*"
-                      style={{ display: "none" }}
-                      onChange={(e) =>
-                        handleUploadAdditionalPhoto(e, setFieldValue)
-                      }
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        document.getElementById("additionalPhotoInput").click()
-                      }
-                      className={commonStyles.buttonSecondary}
-                      disabled={isSubmitting}
+                    <div
                       style={{
-                        flex: 1,
-                        minWidth: "120px",
                         display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: "8px",
+                        gap: "10px",
+                        marginTop: "10px",
+                        flexWrap: "wrap",
                       }}
                     >
-                      + Add Extra File
-                    </button>
+                      {values.scanned_files_array &&
+                      values.scanned_files_array.length > 0 ? (
+                        <div
+                          className={styles.inputGroup}
+                          style={{ width: "100%" }}
+                        >
+                          <label>
+                            Original Scanned Documents (
+                            {values.scanned_files_array.length})
+                          </label>
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "10px",
+                              flexWrap: "wrap",
+                              marginTop: "8px",
+                            }}
+                          >
+                            {values.scanned_files_array.map((url, idx) => (
+                              <StorageMedia
+                                key={idx}
+                                bucketName="original-photos"
+                                identifier={url}
+                                alt={`Original Scanned ${idx + 1}`}
+                                style={{
+                                  height: "120px",
+                                  width: "120px",
+                                  objectFit: "cover",
+                                  borderRadius: "8px",
+                                  border: "1px solid var(--color-border)",
+                                  backgroundColor: "#fff",
+                                }}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      ) : values.original_photo_url ? (
+                        <div className={styles.inputGroup} style={{ flex: 1 }}>
+                          <label>Original Document</label>
+                          <StorageMedia
+                            bucketName="original-photos"
+                            identifier={values.original_photo_url}
+                            alt="Scanned Document"
+                            className={styles.previewImageDoc}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
 
-                    <button
-                      type="submit"
-                      className={commonStyles.buttonPrimary}
-                      disabled={isSubmitting || isScanning}
+                    {scanSelectionChanged && values.ocr_result && (
+                      <p role="status">
+                        Selected files changed. Scan them before saving.
+                      </p>
+                    )}
+                    <OcrReview templates={workTypeTemplates || []} />
+                    <div
                       style={{
-                        flex: 2,
-                        minWidth: "200px",
                         display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: "8px",
+                        gap: "12px",
+                        marginTop: "16px",
+                        width: "100%",
+                        flexWrap: "wrap",
                       }}
                     >
-                      <FaPlus /> Save Project
-                    </button>
-                  </div>
+                      <input
+                        type="file"
+                        id="additionalPhotoInput"
+                        accept="image/*"
+                        style={{ display: "none" }}
+                        onChange={(e) =>
+                          handleUploadAdditionalPhoto(e, setFieldValue)
+                        }
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          document
+                            .getElementById("additionalPhotoInput")
+                            .click()
+                        }
+                        className={commonStyles.buttonSecondary}
+                        disabled={isSubmitting}
+                        style={{
+                          flex: 1,
+                          minWidth: "120px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: "8px",
+                        }}
+                      >
+                        + Add Extra File
+                      </button>
+
+                      <button
+                        type="submit"
+                        className={commonStyles.buttonPrimary}
+                        disabled={
+                          isSubmitting ||
+                          isScanning ||
+                          Boolean(
+                            values.ocr_result &&
+                            (!values.ocr_reviewed || scanSelectionChanged),
+                          )
+                        }
+                        style={{
+                          flex: 2,
+                          minWidth: "200px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: "8px",
+                        }}
+                      >
+                        <FaPlus /> Save Project
+                      </button>
+                    </div>
+                  </fieldset>
                 </Form>
               )}
             </Formik>
