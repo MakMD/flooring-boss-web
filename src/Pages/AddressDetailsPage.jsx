@@ -1,5 +1,5 @@
 // src/Pages/AddressDetailsPage.jsx
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 import {
@@ -11,7 +11,6 @@ import {
   FaFileAlt,
   FaSpinner,
   FaTimes,
-  FaFilePdf,
   FaCheckCircle,
   FaWrench,
   FaInfoCircle,
@@ -30,11 +29,12 @@ import { useAdminLists } from "../hooks/useAdminLists";
 import WorkTypesManager from "../components/WorkTypesManager/WorkTypesManager";
 import MaterialsManager from "../components/MaterialsManager/MaterialsManager";
 
-const isImage = (url) => {
-  if (!url) return false;
-  const cleanUrl = url.split("?")[0];
-  return cleanUrl.match(/\.(jpeg|jpg|gif|png|webp|bmp)$/i) != null;
-};
+import StorageMedia from "../components/StorageMedia/StorageMedia";
+import {
+  isImageFile as isImage,
+  resolveStorageFile,
+  storageReference,
+} from "../utils/storageFiles";
 
 const getStatusStyle = (status) => {
   if (status === "Ready")
@@ -54,40 +54,40 @@ const FileListItem = ({
   const [signedUrl, setSignedUrl] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  const [fileError, setFileError] = useState(false);
   useEffect(() => {
-    const getUrl = async () => {
-      setIsLoading(true);
-      let path = fileIdentifier;
-      try {
-        if (fileIdentifier.startsWith("http")) {
-          const url = new URL(fileIdentifier);
-          const marker = `/${bucketName}/`;
-          const index = url.pathname.indexOf(marker);
-          if (index !== -1) {
-            path = url.pathname.substring(index + marker.length);
-          } else {
-            path = url.pathname.split("/").pop();
-          }
-        }
-      } catch (e) {
-        path = fileIdentifier;
-      }
-      const { data, error } = await supabase.storage
-        .from(bucketName)
-        .createSignedUrl(path, 3600);
-
-      if (error) setSignedUrl(fileIdentifier);
-      else setSignedUrl(data.signedUrl);
-
-      setIsLoading(false);
+    let active = true;
+    setIsLoading(true);
+    setSignedUrl(null);
+    setFileError(false);
+    resolveStorageFile(
+      supabase,
+      fileIdentifier,
+      bucketName,
+      import.meta.env.VITE_SUPABASE_URL,
+    )
+      .then((url) => {
+        if (active) setSignedUrl(url);
+      })
+      .catch(() => {
+        if (active) setFileError(true);
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+    return () => {
+      active = false;
     };
-    getUrl();
   }, [bucketName, fileIdentifier]);
 
   const handleLinkClick = (e) => {
     if (!signedUrl) {
       e.preventDefault();
-      toast("Generating file link, please wait...");
+      toast.error(
+        fileError
+          ? "File unavailable. Please reload to retry."
+          : "Generating file link, please wait...",
+      );
       return;
     }
     if (isImage(signedUrl) || isImage(fileIdentifier)) {
@@ -102,7 +102,7 @@ const FileListItem = ({
   return (
     <li className={styles.fileItem}>
       <a
-        href={signedUrl || fileIdentifier}
+        href={signedUrl || undefined}
         target="_blank"
         rel="noopener noreferrer"
         className={`${styles.fileLink} ${isLoading ? styles.disabledLink : ""}`}
@@ -110,6 +110,7 @@ const FileListItem = ({
       >
         {isLoading ? <FaSpinner className={styles.spinner} /> : <FaFileAlt />}
         {fileName}
+        {fileError && " — File unavailable"}
       </a>
       <div style={{ display: "flex", gap: "8px" }}>
         <button
@@ -127,6 +128,14 @@ const FileListItem = ({
 const AddressDetailsPage = () => {
   const { addressId } = useParams();
   const navigate = useNavigate();
+  const lightboxRequest = useRef(0);
+  const [lightboxError, setLightboxError] = useState(false);
+  useEffect(
+    () => () => {
+      lightboxRequest.current += 1;
+    },
+    [],
+  );
 
   const [addressData, setAddressData] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -248,14 +257,32 @@ const AddressDetailsPage = () => {
     fetchData();
   }, [fetchData]);
 
-  const openLightbox = (imagesArray, startIndex = 0) => {
-    setLightboxImages(imagesArray);
+  const openLightbox = async (
+    imagesArray,
+    startIndex = 0,
+    bucketName = BUCKET_NAME,
+  ) => {
+    const request = ++lightboxRequest.current;
+    const urls = await Promise.all(
+      imagesArray.map((identifier) =>
+        resolveStorageFile(
+          supabase,
+          identifier,
+          bucketName,
+          import.meta.env.VITE_SUPABASE_URL,
+        ).catch(() => null),
+      ),
+    );
+    if (request !== lightboxRequest.current) return;
+    setLightboxImages(urls);
     setCurrentImageIndex(startIndex);
+    setLightboxError(false);
     setZoomScale(1);
     setImgPosition({ x: 0, y: 0 });
   };
 
   const closeLightbox = () => {
+    lightboxRequest.current += 1;
     setLightboxImages([]);
     setZoomScale(1);
     setImgPosition({ x: 0, y: 0 });
@@ -263,6 +290,7 @@ const AddressDetailsPage = () => {
 
   const showNextImage = (e) => {
     e.stopPropagation();
+    setLightboxError(false);
     setCurrentImageIndex((prev) => (prev + 1) % lightboxImages.length);
     setZoomScale(1);
     setImgPosition({ x: 0, y: 0 });
@@ -270,6 +298,7 @@ const AddressDetailsPage = () => {
 
   const showPrevImage = (e) => {
     e.stopPropagation();
+    setLightboxError(false);
     setCurrentImageIndex(
       (prev) => (prev - 1 + lightboxImages.length) % lightboxImages.length,
     );
@@ -397,14 +426,18 @@ const AddressDetailsPage = () => {
 
   const handleFileDelete = async (fileIdentifier) => {
     if (!window.confirm("Are you sure you want to delete this file?")) return;
-    let path = fileIdentifier;
-    try {
-      const url = new URL(fileIdentifier);
-      path = url.pathname.substring(
-        url.pathname.indexOf(BUCKET_NAME) + BUCKET_NAME.length + 1,
-      );
-    } catch (e) {}
-    const { error } = await supabase.storage.from(BUCKET_NAME).remove([path]);
+    const reference = storageReference(
+      fileIdentifier,
+      BUCKET_NAME,
+      import.meta.env.VITE_SUPABASE_URL,
+    );
+    if (!reference) {
+      toast.error("Cannot delete an external file.");
+      return;
+    }
+    const { error } = await supabase.storage
+      .from(reference.bucket)
+      .remove([reference.path]);
     if (error) {
       toast.error("Failed to delete file.");
       return;
@@ -488,6 +521,7 @@ const AddressDetailsPage = () => {
                 onClick={(e) => {
                   e.stopPropagation();
                   const url = lightboxImages[currentImageIndex];
+                  if (!url) return;
 
                   // Перевірка: якщо телефон - нативне меню, якщо ПК - WhatsApp Web
                   if (
@@ -579,18 +613,25 @@ const AddressDetailsPage = () => {
               </button>
             )}
 
-            <img
-              src={lightboxImages[currentImageIndex]}
-              alt="Fullscreen view"
-              style={{
-                transform: `scale(${zoomScale}) translate(${imgPosition.x / zoomScale}px, ${imgPosition.y / zoomScale}px)`,
-              }}
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={handleMouseUp}
-              onClick={(e) => e.stopPropagation()}
-            />
+            {lightboxError || !lightboxImages[currentImageIndex] ? (
+              <p role="alert" style={{ color: "white" }}>
+                Photo unavailable. Close and reopen to retry.
+              </p>
+            ) : (
+              <img
+                onError={() => setLightboxError(true)}
+                src={lightboxImages[currentImageIndex]}
+                alt="Fullscreen view"
+                style={{
+                  transform: `scale(${zoomScale}) translate(${imgPosition.x / zoomScale}px, ${imgPosition.y / zoomScale}px)`,
+                }}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseUp}
+                onClick={(e) => e.stopPropagation()}
+              />
+            )}
 
             {lightboxImages.length > 1 && (
               <button className={styles.navBtnRight} onClick={showNextImage}>
@@ -804,31 +845,19 @@ const AddressDetailsPage = () => {
                       >
                         {uniqueOriginals.map((url, idx) => (
                           <div key={idx} style={{ position: "relative" }}>
-                            {isImage(url) ? (
-                              <img
-                                src={url}
-                                alt={`Scanned Document ${idx + 1}`}
-                                className={styles.originalPhoto}
-                                onClick={() =>
-                                  openLightbox(
-                                    uniqueOriginals.filter(isImage),
-                                    uniqueOriginals
-                                      .filter(isImage)
-                                      .indexOf(url),
-                                  )
-                                }
-                              />
-                            ) : (
-                              <a
-                                href={url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className={styles.pdfLinkBox}
-                              >
-                                <FaFilePdf size={30} color="#dc3545" />
-                                <span>View PDF {idx + 1}</span>
-                              </a>
-                            )}
+                            <StorageMedia
+                              identifier={url}
+                              bucketName="original-photos"
+                              alt={`Original Document ${idx + 1}`}
+                              className={styles.originalPhoto}
+                              onClick={() =>
+                                openLightbox(
+                                  uniqueOriginals.filter(isImage),
+                                  uniqueOriginals.filter(isImage).indexOf(url),
+                                  "original-photos",
+                                )
+                              }
+                            />
                           </div>
                         ))}
                       </div>
@@ -1064,13 +1093,18 @@ const AddressDetailsPage = () => {
                                   </span>
                                   <div className={styles.photoGrid}>
                                     {report.photos_before.map((url, i) => (
-                                      <img
+                                      <StorageMedia
+                                        bucketName="worker-documents"
                                         key={`before-${i}`}
-                                        src={url}
+                                        identifier={url}
                                         alt="Before"
                                         className={styles.thumbnail}
                                         onClick={() =>
-                                          openLightbox(report.photos_before, i)
+                                          openLightbox(
+                                            report.photos_before,
+                                            i,
+                                            "worker-documents",
+                                          )
                                         }
                                       />
                                     ))}
@@ -1085,13 +1119,18 @@ const AddressDetailsPage = () => {
                                   </span>
                                   <div className={styles.photoGrid}>
                                     {report.photos_after.map((url, i) => (
-                                      <img
+                                      <StorageMedia
+                                        bucketName="worker-documents"
                                         key={`after-${i}`}
-                                        src={url}
+                                        identifier={url}
                                         alt="After"
                                         className={styles.thumbnail}
                                         onClick={() =>
-                                          openLightbox(report.photos_after, i)
+                                          openLightbox(
+                                            report.photos_after,
+                                            i,
+                                            "worker-documents",
+                                          )
                                         }
                                       />
                                     ))}

@@ -1,4 +1,11 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import {
+  useState,
+  useMemo,
+  useEffect,
+  useCallback,
+  useRef,
+  useLayoutEffect,
+} from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 import { useAdminLists } from "../hooks/useAdminLists";
@@ -15,7 +22,6 @@ import {
   FaTimes,
   FaWrench,
   FaBuilding,
-  FaCheckCircle,
 } from "react-icons/fa";
 import { MdOutlineChevronRight } from "react-icons/md";
 import styles from "./AddressListPage.module.css";
@@ -31,6 +37,13 @@ import {
 } from "date-fns";
 import { Formik, Form, Field, ErrorMessage } from "formik";
 import * as Yup from "yup";
+
+import AssignedWorkers from "../components/AssignedWorkers/AssignedWorkers";
+import { useAuth } from "../contexts/AuthContext";
+import {
+  readProjectListState,
+  writeProjectListState,
+} from "../utils/projectListState";
 
 const PAGE_SIZE = 40;
 
@@ -79,31 +92,45 @@ const isMatch = (dbName, aiName) => {
 };
 
 const AddressListPage = () => {
+  const { user } = useAuth();
+  const storageKey = `projects-view:${user.id}`;
+  const [savedView] = useState(() => readProjectListState(storageKey));
+  const restoring = useRef(true);
+  const requestId = useRef(0);
+  const scrollY = useRef(savedView.scrollY || 0);
   const [addresses, setAddresses] = useState([]);
   const [addressesLoading, setAddressesLoading] = useState(true);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(savedView.page || 1);
   const [hasMore, setHasMore] = useState(true);
 
-  const [projectTab, setProjectTab] = useState("Address");
+  const [projectTab, setProjectTab] = useState(
+    savedView.projectTab || "Address",
+  );
 
   const { builders, stores, products } = useAdminLists();
   const navigate = useNavigate();
   const location = useLocation();
 
   const [searchTerm, setSearchTerm] = useState(
-    location.state?.searchTerm || "",
+    savedView.searchTerm ?? location.state?.searchTerm ?? "",
   );
   const [debouncedSearch, setDebouncedSearch] = useState(searchTerm);
 
   const [dateFilter, setDateFilter] = useState(
-    location.state?.dateFilter || "all",
+    savedView.dateFilter ?? location.state?.dateFilter ?? "all",
   );
   const [statusFilter, setStatusFilter] = useState(
-    location.state?.statusFilter || "all",
+    savedView.statusFilter ?? location.state?.statusFilter ?? "all",
   );
-  const [builderFilter, setBuilderFilter] = useState("all");
-  const [storeFilter, setStoreFilter] = useState("all");
-  const [productFilter, setProductFilter] = useState("all");
+  const [builderFilter, setBuilderFilter] = useState(
+    savedView.builderFilter || "all",
+  );
+  const [storeFilter, setStoreFilter] = useState(
+    savedView.storeFilter || "all",
+  );
+  const [productFilter, setProductFilter] = useState(
+    savedView.productFilter || "all",
+  );
 
   const [isEditing, setIsEditing] = useState(false);
   const [editedAddresses, setEditedAddresses] = useState({});
@@ -121,9 +148,10 @@ const AddressListPage = () => {
 
   const fetchAddresses = useCallback(
     async (pageNumber = 1, reset = false) => {
+      const currentRequest = ++requestId.current;
       setAddressesLoading(true);
-      const from = (pageNumber - 1) * PAGE_SIZE;
-      const to = from + PAGE_SIZE - 1;
+      const from = reset ? 0 : (pageNumber - 1) * PAGE_SIZE;
+      const to = pageNumber * PAGE_SIZE - 1;
 
       let query = supabase
         .from("addresses")
@@ -157,6 +185,7 @@ const AddressListPage = () => {
 
       const { data, error, count } = await query.range(from, to);
 
+      if (currentRequest !== requestId.current) return;
       if (error) {
         toast.error(`Error: ${error.message}`);
       } else {
@@ -200,9 +229,54 @@ const AddressListPage = () => {
   );
 
   useEffect(() => {
-    setPage(1);
-    fetchAddresses(1, true);
-  }, [fetchAddresses]);
+    const initialPage = restoring.current ? savedView.page || 1 : 1;
+    setPage(initialPage);
+    fetchAddresses(initialPage, true);
+    return () => {
+      requestId.current += 1;
+    };
+  }, [fetchAddresses, savedView]);
+
+  useLayoutEffect(() => {
+    if (addressesLoading || !restoring.current) return;
+    window.scrollTo(0, scrollY.current);
+    restoring.current = false;
+  }, [addressesLoading, addresses]);
+
+  useEffect(() => {
+    const save = () =>
+      writeProjectListState(storageKey, {
+        searchTerm,
+        dateFilter,
+        statusFilter,
+        builderFilter,
+        storeFilter,
+        productFilter,
+        projectTab,
+        page,
+        scrollY: scrollY.current,
+      });
+    const onScroll = () => {
+      if (!restoring.current) scrollY.current = window.scrollY;
+      save();
+    };
+    save();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      save();
+    };
+  }, [
+    storageKey,
+    searchTerm,
+    dateFilter,
+    statusFilter,
+    builderFilter,
+    storeFilter,
+    productFilter,
+    projectTab,
+    page,
+  ]);
 
   const refetch = () => {
     setPage(1);
@@ -758,6 +832,7 @@ const AddressListPage = () => {
 
   return (
     <div className={styles.pageContainer}>
+      <AssignedWorkers />
       <div className={styles.mobileLayout}>
         <div className={styles.header}>
           <button

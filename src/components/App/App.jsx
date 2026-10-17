@@ -6,6 +6,7 @@ import {
   Navigate,
 } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
+import styles from "./App.module.css";
 
 import { ThemeProvider } from "../../contexts/ThemeContext";
 import { AuthProvider, useAuth } from "../../contexts/AuthContext";
@@ -250,7 +251,17 @@ const App = () => {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
+        <Toaster
+          position="top-right"
+          containerClassName={styles.toastContainer}
+          toastOptions={{
+            duration: 3000,
+            style: {
+              pointerEvents: "none",
+              maxWidth: "min(360px, calc(100vw - 32px))",
+            },
+          }}
+        />
         <Suspense
           fallback={
             <div

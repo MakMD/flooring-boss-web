@@ -5,10 +5,13 @@
 }
 
 .mainContent {
-  padding-top: 20px;
+  padding: 0 40px;
 }
 
 @media (max-width: 992px) {
+  .mainContent {
+    padding: 0 12px;
+  }
   .appContainer {
     padding: 0;
   }

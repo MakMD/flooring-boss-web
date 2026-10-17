@@ -3,6 +3,7 @@ import { Navigate, Outlet } from "react-router-dom";
 import { Suspense } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import Header from "../components/Header/Header";
+import styles from "./AuthLayout.module.css";
 
 const AuthLayout = () => {
   const { user, loading } = useAuth();
@@ -32,7 +33,7 @@ const AuthLayout = () => {
   return (
     <div style={{ maxWidth: "1400px", margin: "0 auto" }}>
       <Header />
-      <main style={{ padding: "0 40px" }}>
+      <main className={styles.mainContent}>
         <Suspense
           fallback={
             <div
