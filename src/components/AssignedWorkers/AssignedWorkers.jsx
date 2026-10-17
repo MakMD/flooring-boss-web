@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "../../supabaseClient";
+import { activeAssignments, assignmentWindow } from "../../utils/activeAssignments";
 import styles from "./AssignedWorkers.module.css";
 
 export default function AssignedWorkers() {
@@ -14,7 +15,8 @@ export default function AssignedWorkers() {
     const id = ++request.current;
     try {
       const rows = [];
-      // Fetch every assignment, independently of project filters and pagination.
+      const { today, tomorrow } = assignmentWindow();
+      // Include undated jobs for the project-date fallback; filter the effective date below.
       for (let from = 0; ; from += 500) {
         const { data, error: fetchError } = await supabase
           .from("work_types")
@@ -22,6 +24,7 @@ export default function AssignedWorkers() {
             "id, date, status, person_id, people(name), work_type_templates(name), addresses!inner(id, address, date, is_deleted)",
           )
           .not("person_id", "is", null)
+          .or(`and(date.gte.${today},date.lte.${tomorrow}),date.is.null`)
           .or("status.is.null,status.neq.Ready")
           .eq("addresses.is_deleted", false)
           .order("id")
@@ -31,14 +34,7 @@ export default function AssignedWorkers() {
         rows.push(...(data || []));
         if ((data || []).length < 500) break;
       }
-      rows.sort(
-        (a, b) =>
-          (a.people?.name || "").localeCompare(b.people?.name || "") ||
-          String(a.date || a.addresses.date || "").localeCompare(
-            String(b.date || b.addresses.date || ""),
-          ),
-      );
-      setTasks(rows);
+      setTasks(activeAssignments(rows));
       setError(false);
     } catch {
       if (id === request.current) setError(true);
@@ -85,7 +81,7 @@ export default function AssignedWorkers() {
       Unable to load assignments. <button onClick={refresh}>Retry</button>
     </p>
   ) : tasks.length === 0 ? (
-    <p>No active assignments. Completed work is removed from this list.</p>
+    <p>No active assignments for today or tomorrow. Completed work is removed from this list.</p>
   ) : (
     <ul className={styles.list}>
       {tasks.map((task) => (
@@ -123,6 +119,7 @@ export default function AssignedWorkers() {
       </button>
       <aside className={styles.panel} aria-label="Assigned workers">
         <h2>Assigned workers</h2>
+        <p>Today &amp; tomorrow</p>
         <button onClick={refresh}>Refresh</button>
         {content}
       </aside>
@@ -145,6 +142,7 @@ export default function AssignedWorkers() {
             ✕
           </button>
         </div>
+        <p>Today &amp; tomorrow</p>
         {content}
       </dialog>
     </>
