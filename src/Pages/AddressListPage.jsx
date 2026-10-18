@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 import { useAdminLists } from "../hooks/useAdminLists";
 import SkeletonLoader from "../components/SkeletonLoader/SkeletonLoader";
+import AssignedWorkers from "../components/AssignedWorkers/AssignedWorkers";
 import EmptyState from "../components/EmptyState/EmptyState";
 import {
   FaArrowLeft,
@@ -758,6 +759,7 @@ const AddressListPage = () => {
 
   return (
     <div className={styles.pageContainer}>
+      <AssignedWorkers refreshKey={addresses} />
       <div className={styles.mobileLayout}>
         <div className={styles.header}>
           <button
