@@ -1,3 +1,4 @@
+import { StorageImage, StorageLink } from "../StorageMedia";
 import { useState } from "react";
 import { supabase } from "../../supabaseClient";
 import { FaCamera, FaSpinner } from "react-icons/fa";
@@ -101,7 +102,9 @@ const PhotoUploader = ({
         <div className={styles.previewContainer}>
           {uploadedUrls.map((url, index) => (
             <div key={index} className={styles.previewWrapper}>
-              <img src={url} alt="preview" className={styles.previewImage} />
+              {/\.pdf(?:\?|$)/i.test(url)
+                ? <StorageLink bucket={bucketName} href={url} target="_blank" rel="noopener noreferrer">View PDF</StorageLink>
+                : <StorageImage bucket={bucketName} src={url} alt="preview" className={styles.previewImage} />}
               <button
                 type="button"
                 onClick={() => removePhoto(index)}

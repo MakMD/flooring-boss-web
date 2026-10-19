@@ -1,15 +1,17 @@
 .appContainer {
   max-width: 1400px;
   margin: 0 auto;
+}
+.mainContent {
   padding: 0 40px;
 }
-
-.mainContent {
-  padding-top: 20px;
+.loading {
+  text-align: center;
+  padding: 40px;
+  color: var(--color-text-primary);
 }
-
 @media (max-width: 992px) {
-  .appContainer {
-    padding: 0;
+  .mainContent {
+    padding: 0 12px;
   }
 }

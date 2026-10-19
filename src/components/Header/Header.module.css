@@ -348,6 +348,8 @@
   .header {
     margin: 0;
     padding: 10px 15px;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 
   .desktopOnly {
@@ -369,6 +371,9 @@
     left: 0;
     width: 100%;
     height: 100vh;
+    height: 100dvh;
+    box-sizing: border-box;
+    padding-bottom: max(24px, env(safe-area-inset-bottom));
     background-color: var(--color-background);
     z-index: 9999;
     padding-top: 80px;
@@ -420,6 +425,7 @@
   }
 
   .navLink {
+    flex-shrink: 0;
     border-radius: 0;
     padding: 12px 20px;
     width: 100%;
@@ -427,6 +433,7 @@
   }
 
   .navControls {
+    flex-shrink: 0;
     border-left: none;
     padding: 15px 20px;
     margin: 10px 0 0 0;

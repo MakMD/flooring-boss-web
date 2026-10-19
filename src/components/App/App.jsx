@@ -250,7 +250,8 @@ const App = () => {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
+        <Toaster position="bottom-center" containerStyle={{ pointerEvents: "none", bottom: "calc(88px + env(safe-area-inset-bottom))" }}
+          toastOptions={{ duration: 3000, style: { maxWidth: "calc(100vw - 32px)", overflowWrap: "anywhere", pointerEvents: "none" } }} />
         <Suspense
           fallback={
             <div

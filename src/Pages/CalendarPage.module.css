@@ -470,3 +470,15 @@
   display: flex;
   flex-direction: column;
 }
+
+@media (max-width: 767px) {
+  /* Filter wrapping changes the height; fixed sticky offsets can cover cards. */
+  .navbar, .dateMainHeader { position: static; }
+  :global(.react-datepicker__day-name),
+  :global(.react-datepicker__day),
+  :global(.react-datepicker__time-name) {
+    width: 2rem !important;
+    line-height: 2rem !important;
+    margin: 0.15rem !important;
+  }
+}

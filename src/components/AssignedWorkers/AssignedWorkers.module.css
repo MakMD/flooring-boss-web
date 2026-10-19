@@ -1,0 +1,156 @@
+.shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  padding-top: 12px;
+}
+.expanded {
+  grid-template-columns: 280px minmax(0, 1fr);
+}
+.toolbar {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+.toggleButton,
+.iconButton,
+.textButton {
+  font: inherit;
+  cursor: pointer;
+  min-height: 44px;
+  border-radius: var(--border-radius-md, 8px);
+  transition: background-color 0.15s ease;
+}
+.toggleButton {
+  max-width: 100%;
+  flex-wrap: wrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border: 1px solid var(--color-primary);
+  background: var(--color-secondary);
+  color: var(--color-primary);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.toggleButton:hover,
+.iconButton:hover:not(:disabled) {
+  background: var(--color-secondary-hover);
+}
+.count {
+  padding: 3px 7px;
+  border-radius: 12px;
+  background: var(--color-primary);
+  color: #222;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+.period,
+.caption {
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+}
+.page { min-width: 0; }
+.panel {
+  position: sticky;
+  top: 100px;
+  max-height: calc(100dvh - 120px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius-lg, 12px);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-sm);
+}
+.panelHeader {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 10px;
+  background: var(--color-secondary);
+  color: var(--color-primary);
+  border-bottom: 2px solid var(--color-primary);
+}
+.panelHeader h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 38px;
+  width: 38px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+.iconButton:disabled { opacity: 0.55; cursor: wait; }
+.caption { margin: 12px 14px; }
+.groups { padding: 0 12px 14px; }
+.dayHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 16px 0 8px;
+  font-size: 0.83rem;
+}
+.dayHeading time,
+.dayCount { color: var(--color-text-secondary); font-size: 0.75rem; font-weight: 400; }
+.dayCount { margin-left: 5px; }
+.list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.task {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-primary);
+  border-radius: var(--border-radius-md, 8px);
+  background: var(--color-background);
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
+.task a { color: var(--color-text-primary); text-decoration: underline; text-underline-offset: 3px; }
+.task a:hover { color: var(--color-primary-hover); }
+.workName { color: var(--color-text-secondary); font-size: 0.8rem; }
+.status { padding: 3px 7px; border: 1px solid var(--color-border); border-radius: 5px; font-size: 0.7rem; color: var(--color-text-secondary); }
+.message { padding: 16px; color: var(--color-text-secondary); font-size: 0.88rem; line-height: 1.6; }
+.textButton { padding: 8px 12px; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text-primary); }
+.dialog {
+  width: min(440px, calc(100vw - 24px));
+  max-height: calc(100dvh - 32px);
+  box-sizing: border-box;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius-lg, 12px);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-md);
+}
+.dialog::backdrop { background: rgb(0 0 0 / 55%); }
+.dialog .panelHeader { position: sticky; top: 0; z-index: 1; }
+.toggleButton:focus-visible,
+.iconButton:focus-visible,
+.textButton:focus-visible,
+.task a:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+.spinning { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinning { animation: none; } }
+@media (max-width: 1100px) {
+  .expanded { grid-template-columns: minmax(0, 1fr); }
+  .period { display: none; }
+}

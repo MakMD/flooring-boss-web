@@ -9,7 +9,6 @@ import {
   FaCheck,
   FaTrash,
   FaFileAlt,
-  FaSpinner,
   FaTimes,
   FaFilePdf,
   FaCheckCircle,
@@ -28,6 +27,8 @@ import toast from "react-hot-toast";
 import FileUpload from "../components/FileUpload/FileUpload";
 import { useAdminLists } from "../hooks/useAdminLists";
 import WorkTypesManager from "../components/WorkTypesManager/WorkTypesManager";
+import { StorageImage, StorageLink } from "../components/StorageMedia";
+import { resolveStorageUrl } from "../utils/storageUrl";
 import MaterialsManager from "../components/MaterialsManager/MaterialsManager";
 
 const isImage = (url) => {
@@ -51,49 +52,11 @@ const FileListItem = ({
   onImageClick,
   allImages,
 }) => {
-  const [signedUrl, setSignedUrl] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    const getUrl = async () => {
-      setIsLoading(true);
-      let path = fileIdentifier;
-      try {
-        if (fileIdentifier.startsWith("http")) {
-          const url = new URL(fileIdentifier);
-          const marker = `/${bucketName}/`;
-          const index = url.pathname.indexOf(marker);
-          if (index !== -1) {
-            path = url.pathname.substring(index + marker.length);
-          } else {
-            path = url.pathname.split("/").pop();
-          }
-        }
-      } catch (e) {
-        path = fileIdentifier;
-      }
-      const { data, error } = await supabase.storage
-        .from(bucketName)
-        .createSignedUrl(path, 3600);
-
-      if (error) setSignedUrl(fileIdentifier);
-      else setSignedUrl(data.signedUrl);
-
-      setIsLoading(false);
-    };
-    getUrl();
-  }, [bucketName, fileIdentifier]);
-
   const handleLinkClick = (e) => {
-    if (!signedUrl) {
+    if (isImage(fileIdentifier)) {
       e.preventDefault();
-      toast("Generating file link, please wait...");
-      return;
-    }
-    if (isImage(signedUrl) || isImage(fileIdentifier)) {
-      e.preventDefault();
-      const currentIndex = allImages.findIndex((img) => img === fileIdentifier);
-      onImageClick(allImages, currentIndex !== -1 ? currentIndex : 0);
+      const index = allImages.indexOf(fileIdentifier);
+      onImageClick(allImages, Math.max(0, index), bucketName);
     }
   };
 
@@ -101,21 +64,21 @@ const FileListItem = ({
 
   return (
     <li className={styles.fileItem}>
-      <a
-        href={signedUrl || fileIdentifier}
+      <StorageLink
+        bucket={bucketName}
+        href={fileIdentifier}
         target="_blank"
         rel="noopener noreferrer"
-        className={`${styles.fileLink} ${isLoading ? styles.disabledLink : ""}`}
+        className={styles.fileLink}
         onClick={handleLinkClick}
       >
-        {isLoading ? <FaSpinner className={styles.spinner} /> : <FaFileAlt />}
+        <FaFileAlt />
         {fileName}
-      </a>
+      </StorageLink>
       <div style={{ display: "flex", gap: "8px" }}>
         <button
           onClick={() => onDelete(fileIdentifier)}
           className={commonStyles.buttonIcon}
-          disabled={isLoading}
         >
           <FaTrash />
         </button>
@@ -129,6 +92,9 @@ const AddressDetailsPage = () => {
   const navigate = useNavigate();
 
   const [addressData, setAddressData] = useState(null);
+  useEffect(() => {
+    if (addressData) window.dispatchEvent(new Event("assignments:refresh"));
+  }, [addressData]);
   const [isEditing, setIsEditing] = useState(false);
 
   const [newSqFtNote, setNewSqFtNote] = useState("");
@@ -147,6 +113,7 @@ const AddressDetailsPage = () => {
   const [reports, setReports] = useState([]);
   const [expandedReports, setExpandedReports] = useState({});
 
+  const [lightboxBucket, setLightboxBucket] = useState("worker-photos");
   const [lightboxImages, setLightboxImages] = useState([]);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
@@ -248,7 +215,8 @@ const AddressDetailsPage = () => {
     fetchData();
   }, [fetchData]);
 
-  const openLightbox = (imagesArray, startIndex = 0) => {
+  const openLightbox = (imagesArray, startIndex = 0, bucket = "worker-photos") => {
+    setLightboxBucket(bucket);
     setLightboxImages(imagesArray);
     setCurrentImageIndex(startIndex);
     setZoomScale(1);
@@ -403,7 +371,7 @@ const AddressDetailsPage = () => {
       path = url.pathname.substring(
         url.pathname.indexOf(BUCKET_NAME) + BUCKET_NAME.length + 1,
       );
-    } catch (e) {}
+    } catch { /* A raw storage key is already a valid path. */ }
     const { error } = await supabase.storage.from(BUCKET_NAME).remove([path]);
     if (error) {
       toast.error("Failed to delete file.");
@@ -485,9 +453,11 @@ const AddressDetailsPage = () => {
                   justifyContent: "center",
                   transition: "background 0.2s",
                 }}
-                onClick={(e) => {
+                onClick={async (e) => {
                   e.stopPropagation();
-                  const url = lightboxImages[currentImageIndex];
+                  let url;
+                  try { url = await resolveStorageUrl(lightboxImages[currentImageIndex], lightboxBucket); }
+                  catch { toast.error("File unavailable: check access or try again."); return; }
 
                   // Перевірка: якщо телефон - нативне меню, якщо ПК - WhatsApp Web
                   if (
@@ -523,7 +493,8 @@ const AddressDetailsPage = () => {
               </button>
 
               {/* КНОПКА ЗАВАНТАЖЕННЯ (DOWNLOAD) */}
-              <a
+              <StorageLink
+                bucket={lightboxBucket}
                 href={lightboxImages[currentImageIndex]}
                 download={`photo_${currentImageIndex}.jpg`}
                 target="_blank"
@@ -546,7 +517,7 @@ const AddressDetailsPage = () => {
                 onClick={(e) => e.stopPropagation()}
               >
                 <FaDownload />
-              </a>
+              </StorageLink>
 
               {/* КНОПКА ЗАКРИТТЯ */}
               <button
@@ -579,7 +550,8 @@ const AddressDetailsPage = () => {
               </button>
             )}
 
-            <img
+            <StorageImage
+              bucket={lightboxBucket}
               src={lightboxImages[currentImageIndex]}
               alt="Fullscreen view"
               style={{
@@ -805,7 +777,8 @@ const AddressDetailsPage = () => {
                         {uniqueOriginals.map((url, idx) => (
                           <div key={idx} style={{ position: "relative" }}>
                             {isImage(url) ? (
-                              <img
+                              <StorageImage
+                                bucket="original-photos"
                                 src={url}
                                 alt={`Scanned Document ${idx + 1}`}
                                 className={styles.originalPhoto}
@@ -815,11 +788,13 @@ const AddressDetailsPage = () => {
                                     uniqueOriginals
                                       .filter(isImage)
                                       .indexOf(url),
+                                    "original-photos",
                                   )
                                 }
                               />
                             ) : (
-                              <a
+                              <StorageLink
+                                bucket="original-photos"
                                 href={url}
                                 target="_blank"
                                 rel="noopener noreferrer"
@@ -827,7 +802,7 @@ const AddressDetailsPage = () => {
                               >
                                 <FaFilePdf size={30} color="#dc3545" />
                                 <span>View PDF {idx + 1}</span>
-                              </a>
+                              </StorageLink>
                             )}
                           </div>
                         ))}
@@ -1064,7 +1039,8 @@ const AddressDetailsPage = () => {
                                   </span>
                                   <div className={styles.photoGrid}>
                                     {report.photos_before.map((url, i) => (
-                                      <img
+                                      <StorageImage
+                                        bucket="worker-photos"
                                         key={`before-${i}`}
                                         src={url}
                                         alt="Before"
@@ -1085,7 +1061,8 @@ const AddressDetailsPage = () => {
                                   </span>
                                   <div className={styles.photoGrid}>
                                     {report.photos_after.map((url, i) => (
-                                      <img
+                                      <StorageImage
+                                        bucket="worker-photos"
                                         key={`after-${i}`}
                                         src={url}
                                         alt="After"

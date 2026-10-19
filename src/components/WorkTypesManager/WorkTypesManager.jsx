@@ -93,6 +93,9 @@ const SearchableSelect = ({ options, value, onChange, placeholder }) => {
 
 const WorkTypesManager = ({ addressId, addressData }) => {
   const [workTypes, setWorkTypes] = useState([]);
+  useEffect(() => {
+    window.dispatchEvent(new Event("assignments:refresh"));
+  }, [workTypes]);
   const [people, setPeople] = useState([]);
   const { workTypeTemplates, loading: listsLoading } = useAdminLists();
   const [loading, setLoading] = useState(true);

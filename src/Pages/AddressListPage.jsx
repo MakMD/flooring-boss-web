@@ -1,5 +1,6 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
 import { supabase } from "../supabaseClient";
 import { useAdminLists } from "../hooks/useAdminLists";
 import SkeletonLoader from "../components/SkeletonLoader/SkeletonLoader";
@@ -15,7 +16,6 @@ import {
   FaTimes,
   FaWrench,
   FaBuilding,
-  FaCheckCircle,
 } from "react-icons/fa";
 import { MdOutlineChevronRight } from "react-icons/md";
 import styles from "./AddressListPage.module.css";
@@ -79,31 +79,44 @@ const isMatch = (dbName, aiName) => {
 };
 
 const AddressListPage = () => {
+  const { user } = useAuth();
+  const viewKey = `flooring:projects:${user.id}`;
+  const [savedView] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem(viewKey)) || {}; }
+    catch { return {}; }
+  });
+  const restore = useRef(true);
+  const queryVersion = useRef(0);
+
   const [addresses, setAddresses] = useState([]);
   const [addressesLoading, setAddressesLoading] = useState(true);
-  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    window.dispatchEvent(new Event("assignments:refresh"));
+  }, [addresses]);
+  const [page, setPage] = useState(savedView.page || 1);
   const [hasMore, setHasMore] = useState(true);
 
-  const [projectTab, setProjectTab] = useState("Address");
+  const [projectTab, setProjectTab] = useState(savedView.projectTab || "Address");
 
   const { builders, stores, products } = useAdminLists();
   const navigate = useNavigate();
   const location = useLocation();
 
   const [searchTerm, setSearchTerm] = useState(
-    location.state?.searchTerm || "",
+    savedView.searchTerm ?? location.state?.searchTerm ?? "",
   );
   const [debouncedSearch, setDebouncedSearch] = useState(searchTerm);
 
   const [dateFilter, setDateFilter] = useState(
-    location.state?.dateFilter || "all",
+    savedView.dateFilter ?? location.state?.dateFilter ?? "all",
   );
   const [statusFilter, setStatusFilter] = useState(
-    location.state?.statusFilter || "all",
+    savedView.statusFilter ?? location.state?.statusFilter ?? "all",
   );
-  const [builderFilter, setBuilderFilter] = useState("all");
-  const [storeFilter, setStoreFilter] = useState("all");
-  const [productFilter, setProductFilter] = useState("all");
+  const [builderFilter, setBuilderFilter] = useState(savedView.builderFilter || "all");
+  const [storeFilter, setStoreFilter] = useState(savedView.storeFilter || "all");
+  const [productFilter, setProductFilter] = useState(savedView.productFilter || "all");
 
   const [isEditing, setIsEditing] = useState(false);
   const [editedAddresses, setEditedAddresses] = useState({});
@@ -122,8 +135,9 @@ const AddressListPage = () => {
   const fetchAddresses = useCallback(
     async (pageNumber = 1, reset = false) => {
       setAddressesLoading(true);
-      const from = (pageNumber - 1) * PAGE_SIZE;
-      const to = from + PAGE_SIZE - 1;
+      const version = ++queryVersion.current;
+      const from = reset ? 0 : (pageNumber - 1) * PAGE_SIZE;
+      const to = pageNumber * PAGE_SIZE - 1;
 
       let query = supabase
         .from("addresses")
@@ -135,7 +149,8 @@ const AddressListPage = () => {
         )
         .eq("is_deleted", false)
         .eq("project_type", projectTab)
-        .order("date", { ascending: false, nullsLast: true });
+        .order("date", { ascending: false, nullsLast: true })
+        .order("id");
 
       if (debouncedSearch) {
         query = query.or(
@@ -155,11 +170,23 @@ const AddressListPage = () => {
       else if (dateFilter === "yesterday")
         query = query.eq("date", format(subDays(new Date(), 1), "yyyy-MM-dd"));
 
-      const { data, error, count } = await query.range(from, to);
+      // Restore in ordinary page-sized requests, respecting the server row cap.
+      let data = [], error = null, count = null;
+      for (let offset = from; offset <= to; offset += PAGE_SIZE) {
+        const result = await query.range(offset, Math.min(to, offset + PAGE_SIZE - 1));
+        if (version !== queryVersion.current) return;
+        error = result.error;
+        count = result.count;
+        if (error) break;
+        data.push(...(result.data || []));
+        if ((result.data || []).length < PAGE_SIZE) break;
+      }
 
+      if (version !== queryVersion.current) return;
       if (error) {
         toast.error(`Error: ${error.message}`);
       } else {
+        setPage(pageNumber);
         let newItems = data || [];
         if (productFilter !== "all") {
           newItems = newItems.filter(
@@ -200,9 +227,34 @@ const AddressListPage = () => {
   );
 
   useEffect(() => {
-    setPage(1);
-    fetchAddresses(1, true);
-  }, [fetchAddresses]);
+    const pages = restore.current ? Math.max(1, Number(savedView.page) || 1) : 1;
+    setPage(pages);
+    fetchAddresses(pages, true);
+    return () => { queryVersion.current += 1; };
+  }, [fetchAddresses, savedView]);
+
+  useEffect(() => {
+    if (!addressesLoading && restore.current) {
+      restore.current = false;
+      const frame = requestAnimationFrame(() => window.scrollTo(0, savedView.scrollY || 0));
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [addressesLoading, savedView]);
+
+  useEffect(() => {
+    const save = () => {
+      if (restore.current) return;
+      try {
+        sessionStorage.setItem(viewKey, JSON.stringify({ searchTerm, dateFilter,
+          statusFilter, builderFilter, storeFilter, productFilter, projectTab,
+          page, scrollY: window.scrollY }));
+      } catch { /* Browsers may disable session storage. */ }
+    };
+    save();
+    window.addEventListener("scroll", save, { passive: true });
+    return () => window.removeEventListener("scroll", save);
+  }, [viewKey, searchTerm, dateFilter, statusFilter, builderFilter, storeFilter,
+    productFilter, projectTab, page, addressesLoading]);
 
   const refetch = () => {
     setPage(1);
@@ -210,8 +262,8 @@ const AddressListPage = () => {
   };
 
   const loadMore = () => {
+    if (addressesLoading) return;
     const nextPage = page + 1;
-    setPage(nextPage);
     fetchAddresses(nextPage, false);
   };
 

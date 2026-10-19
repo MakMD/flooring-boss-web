@@ -5,6 +5,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { Navigate, useParams, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import PhotoUploader from "../components/PhotoUploader/PhotoUploader";
+import { StorageLink } from "../components/StorageMedia";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import {
@@ -1207,7 +1208,8 @@ const WorkerPortal = () => {
               {documents.length > 0 ? (
                 <div className={styles.docsGrid}>
                   {documents.map((doc, index) => (
-                    <a
+                    <StorageLink
+                      bucket="worker-documents"
                       key={doc.id || index}
                       href={doc.file_url}
                       target="_blank"
@@ -1216,7 +1218,7 @@ const WorkerPortal = () => {
                     >
                       <FaFileAlt className={styles.docIcon} />
                       <span>Документ #{index + 1}</span>
-                    </a>
+                    </StorageLink>
                   ))}
                 </div>
               ) : (
