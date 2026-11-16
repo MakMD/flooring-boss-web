@@ -1,6 +1,6 @@
 // src/Pages/CalendarPage.jsx
-import { useState, useEffect, useMemo, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { Link } from "react-router-dom";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import {
@@ -20,15 +20,14 @@ import {
   FaSyncAlt,
   FaRegCalendarAlt,
   FaRegCalendar,
-  FaMapMarkerAlt,
   FaSearch,
   FaBuilding,
   FaWrench,
 } from "react-icons/fa";
-import { MdOutlineChevronRight } from "react-icons/md";
 import { supabase } from "../supabaseClient";
 import toast from "react-hot-toast";
 import styles from "./CalendarPage.module.css";
+import { calgaryToday, calendarDate, calendarDays, calendarWorkers, calendarSummary, filterCalendarEvents } from "../utils/calendarView.js";
 
 const STORAGE_KEY = "calendar_state";
 const EXPIRATION_TIME = 3 * 60 * 1000;
@@ -40,13 +39,14 @@ const CalendarPage = () => {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Date.now() - parsed.timestamp < EXPIRATION_TIME) {
-          return new Date(parsed.selectedDate);
+          const restored = parsed.dateKey ? calendarDate(parsed.dateKey) : new Date(parsed.selectedDate);
+          if (Number.isFinite(restored.getTime())) return restored;
         }
       }
     } catch (e) {
       console.error("Помилка читання збереженої дати:", e);
     }
-    return new Date();
+    return calgaryToday();
   });
 
   const [viewMode, setViewMode] = useState(() => {
@@ -55,13 +55,13 @@ const CalendarPage = () => {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Date.now() - parsed.timestamp < EXPIRATION_TIME) {
-          return parsed.viewMode || "day";
+          return parsed.viewMode === "day" ? "day" : "week";
         }
       }
-    } catch (e) {
+    } catch {
       /* ignore */
     }
-    return "day";
+    return "week";
   });
 
   const [projectTab, setProjectTab] = useState("Address");
@@ -77,12 +77,15 @@ const CalendarPage = () => {
   const [calendarMonth, setCalendarMonth] = useState(selectedDate);
   const [monthEvents, setMonthEvents] = useState([]);
 
-  const navigate = useNavigate();
+  const [expandedDays, setExpandedDays] = useState({});
+  const [loadError, setLoadError] = useState(false);
+  const requestVersion = useRef(null);
   const weekStartsOn = 1;
 
   useEffect(() => {
     const stateToSave = {
       selectedDate: selectedDate.toISOString(),
+      dateKey: format(selectedDate, "yyyy-MM-dd"),
       viewMode,
       timestamp: Date.now(),
     };
@@ -90,7 +93,10 @@ const CalendarPage = () => {
   }, [selectedDate, viewMode]);
 
   const fetchEvents = useCallback(async () => {
+    const request = Symbol("calendar-request");
+    requestVersion.current = request;
     setLoading(true);
+    setLoadError(false);
 
     let startDate, endDate;
     if (viewMode === "day") {
@@ -105,26 +111,32 @@ const CalendarPage = () => {
     }
 
     // Завантажуємо ВСІ події, без фільтрації по типу проекту, щоб порахувати бейджі
+    try {
     const { data, error } = await supabase
       .from("addresses")
-      .select("*, builders(name), stores(name), work_types(person_id)")
+      .select("*, builders(name), stores(name), work_types(person_id, people(name))")
       .eq("is_deleted", false)
       .gte("date", startDate)
       .lte("date", endDate)
       .order("date", { ascending: true })
       .order("service_time", { ascending: true, nullsFirst: false });
 
-    if (error) {
+    if (request !== requestVersion.current) return;
+    if (error) throw error;
+    setAllEvents(data || []);
+    } catch {
+      if (request !== requestVersion.current) return;
+      setAllEvents([]);
+      setLoadError(true);
       toast.error("Could not fetch calendar events.");
-      console.error(error);
-    } else {
-      setAllEvents(data || []);
+    } finally {
+      if (request === requestVersion.current) setLoading(false);
     }
-    setLoading(false);
   }, [selectedDate, viewMode]);
 
   useEffect(() => {
     fetchEvents();
+    return () => { requestVersion.current = null; };
   }, [fetchEvents]);
 
   useEffect(() => {
@@ -198,39 +210,9 @@ const CalendarPage = () => {
     setCalendarMonth(newDate);
   };
 
-  const filteredEvents = useMemo(() => {
-    return allEvents.filter((event) => {
-      // Спочатку фільтруємо за активною вкладкою (Address або Service)
-      if (event.project_type !== projectTab) return false;
-
-      const query = searchQuery.toLowerCase().trim();
-      const address = (event.address || "").toLowerCase();
-      const builder = (event.builders?.name || "").toLowerCase();
-      const wo = String(event.work_order_number || "").toLowerCase();
-
-      const matchesSearch =
-        !query ||
-        address.includes(query) ||
-        builder.includes(query) ||
-        wo.includes(query);
-
-      const matchesBuilder =
-        selectedBuilder === "All" || event.builders?.name === selectedBuilder;
-      const matchesStore =
-        selectedStore === "All" || event.stores?.name === selectedStore;
-      const matchesStatus =
-        selectedStatus === "All" || event.status === selectedStatus;
-
-      return matchesSearch && matchesBuilder && matchesStore && matchesStatus;
-    });
-  }, [
-    allEvents,
-    projectTab,
-    searchQuery,
-    selectedBuilder,
-    selectedStore,
-    selectedStatus,
-  ]);
+  const filteredEvents = useMemo(() => filterCalendarEvents(allEvents, {
+    projectTab, searchQuery, selectedBuilder, selectedStore, selectedStatus,
+  }), [allEvents, projectTab, searchQuery, selectedBuilder, selectedStore, selectedStatus]);
 
   const uniqueBuilders = useMemo(
     () =>
@@ -274,448 +256,116 @@ const CalendarPage = () => {
     [allEvents, projectTab],
   );
 
-  const groupedEvents = useMemo(() => {
-    return filteredEvents.reduce((acc, event) => {
-      const dateKey = event.date;
-      const storeName = event.stores?.name || "Unknown Store";
-
-      if (!acc[dateKey]) acc[dateKey] = {};
-      if (!acc[dateKey][storeName])
-        acc[dateKey][storeName] = { services: [], jobs: [] };
-
-      if (event.project_type === "Service") {
-        acc[dateKey][storeName].services.push(event);
-      } else {
-        acc[dateKey][storeName].jobs.push(event);
-      }
-      return acc;
-    }, {});
-  }, [filteredEvents]);
-
-  const datesToRender = useMemo(() => {
-    return Object.keys(groupedEvents).length > 0
-      ? Object.keys(groupedEvents).sort()
-      : viewMode === "day"
-        ? [format(selectedDate, "yyyy-MM-dd")]
-        : [];
-  }, [groupedEvents, viewMode, selectedDate]);
-
-  const getHeaderText = () => {
-    if (viewMode === "day") return format(selectedDate, "MM/dd/yyyy");
-    const start = startOfWeek(selectedDate, { weekStartsOn });
-    const end = endOfWeek(selectedDate, { weekStartsOn });
-    return `${format(start, "MM/dd")} - ${format(end, "MM/dd")}`;
+  const dateKey = format(selectedDate, "yyyy-MM-dd");
+  const datesToRender = useMemo(() => calendarDays(dateKey, viewMode), [dateKey, viewMode]);
+  const summary = calendarSummary(filteredEvents);
+  const todayKey = format(calgaryToday(), "yyyy-MM-dd");
+  const allExpanded = datesToRender.every((key) => expandedDays[key]);
+  const addressCount = allEvents.filter((event) => event.project_type === "Address").length;
+  const serviceCount = allEvents.filter((event) => event.project_type === "Service").length;
+  const goToCurrentWeek = () => {
+    const today = calgaryToday();
+    setSelectedDate(today);
+    setCalendarMonth(today);
+    setViewMode("week");
   };
+  const headerText = viewMode === "day" ? format(selectedDate, "MMM d, yyyy")
+    : `${format(calendarDate(datesToRender[0]), "MMM d, yyyy")} – ${format(calendarDate(datesToRender[6]), "MMM d, yyyy")}`;
 
-  const renderStatusBadges = (item) => {
-    const isAssigned =
-      item.work_types && item.work_types.some((wt) => wt.person_id);
-
-    let assignmentBadge = null;
-
-    if (item.status !== "Ready") {
-      if (!isAssigned) {
-        assignmentBadge = (
-          <span
-            style={{
-              backgroundColor: "#fef08a",
-              color: "#b45309",
-              padding: "4px 10px",
-              borderRadius: "20px",
-              fontSize: "0.75rem",
-              fontWeight: "bold",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Непризначено
-          </span>
-        );
-      } else {
-        assignmentBadge = (
-          <span
-            style={{
-              backgroundColor: "#e0e7ff",
-              color: "#4338ca",
-              padding: "4px 10px",
-              borderRadius: "20px",
-              fontSize: "0.75rem",
-              fontWeight: "bold",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Призначено
-          </span>
-        );
-      }
-    }
-
-    let mainStatusText =
-      item.status === "Ready"
-        ? "Готово"
-        : item.status === "Not Finished"
-          ? "Не завершено"
-          : "В процесі";
-
-    return (
-      <div
-        style={{
-          display: "flex",
-          gap: "8px",
-          alignItems: "center",
-          marginTop: "10px",
-        }}
-      >
-        {assignmentBadge}
-        <span
-          style={{
-            backgroundColor:
-              item.status === "Ready"
-                ? "rgba(40, 167, 69, 0.15)"
-                : item.status === "Not Finished"
-                  ? "rgba(220, 53, 69, 0.15)"
-                  : "rgba(255, 193, 7, 0.15)",
-            color:
-              item.status === "Ready"
-                ? "#28a745"
-                : item.status === "Not Finished"
-                  ? "#dc3545"
-                  : "#d39e00",
-            padding: "4px 10px",
-            borderRadius: "20px",
-            fontSize: "0.75rem",
-            fontWeight: "bold",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {mainStatusText}
-        </span>
+  return <section className={styles.calendarContainer} aria-label="Calendar">
+    <header className={styles.pageHeading}>
+      <h1>Calendar</h1>
+      <p>{viewMode === "week" ? "Weekly" : "Daily"} work overview · Calgary time</p>
+    </header>
+    <div className={styles.navbar}>
+      <div className={styles.navGroup}>
+        <button type="button" onClick={handlePrev} className={styles.iconBtn} aria-label={viewMode === "week" ? "Previous week" : "Previous day"}><FaChevronLeft /></button>
+        <DatePicker selected={selectedDate} onChange={(date) => { if (date) { setSelectedDate(date); setCalendarMonth(date); } }}
+          onMonthChange={setCalendarMonth} calendarStartDay={1}
+          customInput={<button type="button" className={styles.datePickerBtn}>{headerText}<FaRegCalendarAlt /></button>}
+          renderDayContents={renderDayContents} calendarClassName={styles.customCalendar} />
+        <button type="button" onClick={handleNext} className={styles.iconBtn} aria-label={viewMode === "week" ? "Next week" : "Next day"}><FaChevronRight /></button>
+        <button type="button" className={styles.textBtn} onClick={goToCurrentWeek}>Поточний тиждень</button>
+        <button type="button" onClick={fetchEvents} disabled={loading} className={styles.iconBtn} aria-label="Refresh calendar"><FaSyncAlt /></button>
       </div>
-    );
-  };
-
-  // === ПІДРАХУНОК ЛІЧИЛЬНИКІВ ===
-  const addressCount = allEvents.filter(
-    (e) => e.project_type === "Address",
-  ).length;
-  const serviceCount = allEvents.filter(
-    (e) => e.project_type === "Service",
-  ).length;
-
-  return (
-    <div className={styles.calendarContainer}>
-      <div className={styles.mobileLayout}>
-        <div className={styles.navbar}>
-          <div className={styles.navTopRow}>
-            <div className={styles.navGroup}>
-              <button onClick={handlePrev} className={styles.iconBtn}>
-                <FaChevronLeft size={14} />
-              </button>
-
-              <DatePicker
-                selected={selectedDate}
-                onChange={(date) => {
-                  setSelectedDate(date);
-                  setCalendarMonth(date);
-                }}
-                onMonthChange={(date) => setCalendarMonth(date)}
-                customInput={
-                  <button className={styles.datePickerBtn}>
-                    {getHeaderText()}
-                    <FaRegCalendarAlt
-                      size={16}
-                      style={{ marginLeft: "8px", color: "#666" }}
-                    />
-                  </button>
-                }
-                renderDayContents={renderDayContents}
-                calendarClassName={styles.customCalendar}
-              />
-
-              <button onClick={handleNext} className={styles.iconBtn}>
-                <FaChevronRight size={14} />
-              </button>
-              <button onClick={fetchEvents} className={styles.iconBtn}>
-                <FaSyncAlt size={14} />
-              </button>
-
-              <button
-                onClick={() => setViewMode("day")}
-                className={`${styles.iconBtn} ${viewMode === "day" ? styles.activeViewBtn : ""}`}
-                title="Day View"
-              >
-                <FaRegCalendar size={16} />
-              </button>
-              <button
-                onClick={() => setViewMode("week")}
-                className={`${styles.iconBtn} ${viewMode === "week" ? styles.activeViewBtn : ""}`}
-                title="Week View"
-              >
-                <FaRegCalendarAlt size={16} />
-              </button>
-            </div>
-          </div>
-
-          <div className={styles.searchContainer}>
-            <FaSearch className={styles.searchIcon} />
-            <input
-              type="text"
-              placeholder="Шукати адресу, клієнта або WO..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className={styles.searchInput}
-            />
-          </div>
-
-          {/* Вкладки (Адреси / Сервіси) з Лічильниками */}
-          <div style={{ display: "flex", gap: "10px", width: "100%" }}>
-            <button
-              onClick={() => setProjectTab("Address")}
-              style={{
-                flex: 1,
-                padding: "10px",
-                borderRadius: "8px",
-                border: "none",
-                fontWeight: "bold",
-                cursor: "pointer",
-                backgroundColor:
-                  projectTab === "Address"
-                    ? "#cfa85c"
-                    : "rgba(255, 255, 255, 0.1)",
-                color: projectTab === "Address" ? "#2c2c2c" : "#cbd5e1",
-                transition: "all 0.2s",
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-                gap: "8px",
-              }}
-            >
-              <FaBuilding /> Адреси
-              {addressCount > 0 && (
-                <span
-                  style={{
-                    backgroundColor: "rgba(255,255,255,0.2)",
-                    color: projectTab === "Address" ? "#1a1a1a" : "#fff",
-                    padding: "2px 8px",
-                    borderRadius: "12px",
-                    fontSize: "0.8rem",
-                    marginLeft: "4px",
-                  }}
-                >
-                  {addressCount}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setProjectTab("Service")}
-              style={{
-                flex: 1,
-                padding: "10px",
-                borderRadius: "8px",
-                border: "none",
-                fontWeight: "bold",
-                cursor: "pointer",
-                backgroundColor:
-                  projectTab === "Service"
-                    ? "#cfa85c"
-                    : "rgba(255, 255, 255, 0.1)",
-                color: projectTab === "Service" ? "#2c2c2c" : "#cbd5e1",
-                transition: "all 0.2s",
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-                gap: "8px",
-              }}
-            >
-              <FaWrench /> Сервіси
-              {serviceCount > 0 && (
-                <span
-                  style={{
-                    backgroundColor: "#ef4444", // Червоний бейдж для сервісів
-                    color: "#fff",
-                    padding: "2px 8px",
-                    borderRadius: "12px",
-                    fontSize: "0.8rem",
-                    marginLeft: "4px",
-                  }}
-                >
-                  {serviceCount}
-                </span>
-              )}
-            </button>
-          </div>
-
-          <div className={styles.filtersContainer}>
-            <select
-              value={selectedBuilder}
-              onChange={(e) => setSelectedBuilder(e.target.value)}
-              className={styles.filterSelect}
-            >
-              {uniqueBuilders.map((b) => (
-                <option key={b} value={b}>
-                  {b === "All" ? "All Builders" : b}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={selectedStore}
-              onChange={(e) => setSelectedStore(e.target.value)}
-              className={styles.filterSelect}
-            >
-              {uniqueStores.map((s) => (
-                <option key={s} value={s}>
-                  {s === "All" ? "All Stores" : s}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
-              className={styles.filterSelect}
-            >
-              {uniqueStatuses.map((s) => (
-                <option key={s} value={s}>
-                  {s === "All" ? "All Statuses" : s}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className={styles.content}>
-          {loading ? (
-            <p className={styles.loadingText}>Loading schedule...</p>
-          ) : datesToRender.length === 0 ? (
-            <div className={styles.noEvents}>
-              {searchQuery ||
-              selectedBuilder !== "All" ||
-              selectedStore !== "All" ||
-              selectedStatus !== "All"
-                ? "Нічого не знайдено за вашими фільтрами."
-                : `No ${projectTab.toLowerCase()}es for this period.`}
-            </div>
-          ) : (
-            <div className={styles.listContainer}>
-              {datesToRender.map((dateKey) => {
-                const storesData = groupedEvents[dateKey] || {};
-                const displayDate = format(
-                  new Date(dateKey + "T00:00:00"),
-                  "EEEE, dd MMM yyyy",
-                );
-
-                const storeNames = Object.keys(storesData).sort();
-
-                return (
-                  <div key={dateKey} className={styles.dayGroup}>
-                    <div className={styles.dateMainHeader}>{displayDate}</div>
-
-                    {storeNames.length === 0 ? (
-                      <div className={styles.noEvents}>
-                        No projects for {displayDate}.
-                      </div>
-                    ) : (
-                      storeNames.map((storeName) => {
-                        const dayData = storesData[storeName];
-                        return (
-                          <div key={storeName} className={styles.storeSection}>
-                            {dayData.services.length > 0 && (
-                              <div className={styles.section}>
-                                <div className={styles.sectionHeader}>
-                                  {storeName} - Services (
-                                  {dayData.services.length})
-                                </div>
-                                <div className={styles.cardsList}>
-                                  {dayData.services.map((event) => (
-                                    <div
-                                      key={event.id}
-                                      className={styles.card}
-                                      onClick={() =>
-                                        navigate(`/address/${event.id}`)
-                                      }
-                                    >
-                                      <div className={styles.cardContent}>
-                                        <div className={styles.cardTitle}>
-                                          Service:{" "}
-                                          {event.work_order_number || "N/A"} -{" "}
-                                          {event.builders?.name ||
-                                            "Unknown Builder"}
-                                          {event.service_time
-                                            ? ` - ${event.service_time}`
-                                            : ""}
-                                        </div>
-                                        <div className={styles.cardAddress}>
-                                          <FaMapMarkerAlt
-                                            className={styles.pinIcon}
-                                          />
-                                          <span>{event.address}</span>
-                                        </div>
-                                        {event.notes && (
-                                          <div className={styles.cardNotes}>
-                                            {event.notes}
-                                          </div>
-                                        )}
-                                        {renderStatusBadges(event)}
-                                      </div>
-                                      <MdOutlineChevronRight
-                                        className={styles.chevronIcon}
-                                      />
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {dayData.jobs.length > 0 && (
-                              <div className={styles.section}>
-                                <div className={styles.sectionHeader}>
-                                  {storeName} - Jobs ({dayData.jobs.length})
-                                </div>
-                                <div className={styles.cardsList}>
-                                  {dayData.jobs.map((event) => (
-                                    <div
-                                      key={event.id}
-                                      className={styles.card}
-                                      onClick={() =>
-                                        navigate(`/address/${event.id}`)
-                                      }
-                                    >
-                                      <div className={styles.cardContent}>
-                                        <div className={styles.cardTitle}>
-                                          WO #:{" "}
-                                          {event.work_order_number || "N/A"} -{" "}
-                                          {event.builders?.name ||
-                                            "Unknown Builder"}
-                                        </div>
-                                        <div className={styles.cardAddress}>
-                                          <FaMapMarkerAlt
-                                            className={styles.pinIcon}
-                                          />
-                                          <span>{event.address}</span>
-                                        </div>
-                                        {renderStatusBadges(event)}
-                                      </div>
-                                      <MdOutlineChevronRight
-                                        className={styles.chevronIcon}
-                                      />
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+      <div className={styles.viewControls}>
+        <button type="button" aria-pressed={viewMode === "day"} onClick={() => setViewMode("day")} className={styles.textBtn}><FaRegCalendar /> День</button>
+        <button type="button" aria-pressed={viewMode === "week"} onClick={() => setViewMode("week")} className={styles.textBtn}><FaRegCalendarAlt /> Тиждень</button>
       </div>
     </div>
-  );
+    <div className={styles.filterBar}>
+      <label className={styles.searchContainer}><FaSearch /><input aria-label="Search address, builder or WO" placeholder="Шукати адресу, клієнта або WO..." value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} /></label>
+      <select aria-label="Builder filter" value={selectedBuilder} onChange={(event) => setSelectedBuilder(event.target.value)}>{uniqueBuilders.map((name) => <option key={name} value={name}>{name === "All" ? "All Builders" : name}</option>)}</select>
+      <select aria-label="Store filter" value={selectedStore} onChange={(event) => setSelectedStore(event.target.value)}>{uniqueStores.map((name) => <option key={name} value={name}>{name === "All" ? "All Stores" : name}</option>)}</select>
+      <select aria-label="Status filter" value={selectedStatus} onChange={(event) => setSelectedStatus(event.target.value)}>{uniqueStatuses.map((name) => <option key={name} value={name}>{name === "All" ? "All Statuses" : name}</option>)}</select>
+      <div className={styles.projectTabs}>
+        <button type="button" aria-pressed={projectTab === "Address"} onClick={() => setProjectTab("Address")}><FaBuilding /> Адреси ({loading ? "…" : addressCount})</button>
+        <button type="button" aria-pressed={projectTab === "Service"} onClick={() => setProjectTab("Service")}><FaWrench /> Сервіси ({loading ? "…" : serviceCount})</button>
+      </div>
+    </div>
+    <div className={styles.overview}>
+      <p role="status">{loading ? "Loading schedule…" : loadError ? "Schedule unavailable" : <>
+        <strong>{summary.total}</strong> {viewMode === "week" ? "робіт за тиждень" : "робіт за день"}
+        <span className={styles.summaryDivider}>·</span><strong>{summary.unassigned}</strong> непризначених
+        <small>За поточними фільтрами · кількість проєктів</small>
+      </>}</p>
+      <button type="button" className={styles.expandButton} disabled={loading || loadError} aria-expanded={allExpanded}
+        onClick={() => setExpandedDays(Object.fromEntries(datesToRender.map((key) => [key, !allExpanded])))}>
+        {allExpanded ? "Згорнути всі дні" : "Розгорнути всі дні"}
+      </button>
+    </div>
+    {loading ? <p className={styles.loadingText}>Loading schedule...</p> : loadError ? <div role="alert" className={styles.empty}>Не вдалося завантажити календар. <button type="button" onClick={fetchEvents}>Спробувати ще раз</button></div> :
+      <div className={styles.weekRows}>{datesToRender.map((key) => <CalendarDay key={key} dateKey={key}
+        events={filteredEvents.filter((event) => event.date === key)} today={key === todayKey}
+        expanded={!!expandedDays[key]} onToggle={() => setExpandedDays((old) => ({ ...old, [key]: !old[key] }))} />)}</div>}
+  </section>;
 };
+
+function CalendarDay({ dateKey, events, today, expanded, onToggle }) {
+  const grid = useRef(null);
+  const [columns, setColumns] = useState(1);
+  useEffect(() => {
+    const element = grid.current;
+    const measure = () => {
+      const tracks = getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean);
+      setColumns(Math.max(1, tracks.length));
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    measure();
+    return () => observer.disconnect();
+  }, []);
+  const visible = expanded ? events : events.slice(0, columns);
+  const date = calendarDate(dateKey);
+  return <section className={`${styles.dayRow} ${today ? styles.today : ""}`} aria-label={format(date, "EEEE, MMM d, yyyy")}>
+    <header className={styles.dayLabel}>
+      <h2>{format(date, "EEE d")}</h2><time dateTime={dateKey}>{format(date, "MMM d, yyyy")}</time>
+      <span>{events.length} робіт</span>{today && <small>Сьогодні</small>}
+    </header>
+    <div className={styles.dayBody}>
+      <div ref={grid} id={`calendar-${dateKey}`} className={styles.cardsGrid}>
+        {visible.map((event) => {
+          const workers = calendarWorkers(event);
+          const status = event.status === "Ready" ? "Готово" : event.status === "Not Finished" ? "Не завершено" : "В процесі";
+          return <Link key={event.id} to={`/address/${event.id}`} className={`${styles.card} ${event.status === "Ready" ? styles.ready : workers.length ? styles.assigned : styles.unassigned}`}>
+            <strong className={styles.cardAddress}>{event.address || "Unknown address"}</strong>
+            <span className={styles.cardMeta}>WO #{event.work_order_number || "N/A"} · {event.builders?.name || "Unknown Builder"}</span>
+            <span className={styles.store}>{event.stores?.name || "Unknown Store"}{event.project_type === "Service" && ` · Service${event.service_time ? ` · ${event.service_time}` : ""}`}</span>
+            {event.project_type === "Service" && event.notes && <span className={styles.notes}>{event.notes}</span>}
+            <span className={styles.cardFooter}>
+              <span className={styles.workers}>{workers.length ? workers.map((name, index) => <span key={index} className={styles.worker}>{name}</span>)
+                : event.status !== "Ready" && <span className={styles.unassignedLabel}>Непризначено</span>}</span>
+              <span title={event.status} className={`${styles.status} ${event.status === "Ready" ? styles.statusReady : event.status === "Not Finished" ? styles.statusUnfinished : styles.statusProgress}`}>{status}</span>
+            </span>
+          </Link>;
+        })}
+      </div>
+      {!events.length && <p className={styles.empty}>Немає робіт за поточними фільтрами.</p>}
+      {events.length > columns && <button type="button" className={styles.moreButton} aria-expanded={expanded} aria-controls={`calendar-${dateKey}`} onClick={onToggle}>
+        {expanded ? "Згорнути" : `Ще ${events.length - visible.length}`}
+      </button>}
+    </div>
+  </section>;
+}
 
 export default CalendarPage;

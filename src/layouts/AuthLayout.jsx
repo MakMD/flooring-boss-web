@@ -45,7 +45,7 @@ const AuthLayout = () => {
           <AssignedWorkers
             key={user.id}
             pathname={pathname}
-            defaultOpen={["/addresses", "/calendar"].includes(pathname.replace(/\/$/, ""))}
+            defaultOpen={pathname.replace(/\/$/, "") === "/addresses"}
           >
             {page}
           </AssignedWorkers>

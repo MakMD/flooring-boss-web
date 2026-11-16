@@ -1,484 +1,78 @@
-/* --- БАЗОВИЙ КОНТЕЙНЕР --- */
-.calendarContainer {
-  min-height: 100vh;
-  background-color: var(--color-background, #f5f5f5);
-  padding: 16px;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-}
-
-/* --- ГОЛОВНИЙ МАКЕТ --- */
-.mobileLayout {
-  width: 100%;
-  max-width: 1200px;
-  background-color: #ffffff;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  border-radius: 8px;
-  border: 1px solid #e0e0e0;
-  display: flex;
-  flex-direction: column;
-}
-
-/* --- ВЕРХНЯ НАВІГАЦІЯ (ЛИПКА) --- */
-.navbar {
-  position: sticky;
-  top: 80px;
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  padding: 16px 20px;
-  background-color: #2c2c2c;
-  gap: 16px;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
-}
-
-.navTopRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-/* ГРУПА З УСІМА КНОПКАМИ */
-.navGroup {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.iconBtn {
-  background: #2c2c2c;
-  border: 1px solid #cfa85c;
-  color: #cfa85c;
-  width: 38px;
-  height: 38px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.iconBtn:hover {
-  background-color: #444444;
-}
-
-.activeViewBtn {
-  background-color: #cfa85c;
-  color: #2c2c2c;
-}
-
-.activeViewBtn:hover {
-  background-color: #b38f42;
-}
-
-/* --- КНОПКА ВИПАДАЮЧОГО КАЛЕНДАРЯ --- */
-.datePickerBtn {
-  background-color: #ffffff;
-  color: #333333;
-  padding: 8px 16px;
-  border: 1px solid #cfa85c;
-  border-radius: 4px;
-  font-weight: 600;
-  font-size: 0.95rem;
-  cursor: pointer;
-  transition: background-color 0.2s;
-  min-width: 140px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.datePickerBtn:hover {
-  background-color: #f9f9f9;
-}
-
-/* --- СТИЛІ ДЛЯ ДНІВ КАЛЕНДАРЯ (З КРАПКАМИ) --- */
-.dateCell {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  position: relative;
-}
-
-.indicator {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  position: absolute;
-  bottom: 2px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 10;
-}
-
-.indicatorRed {
-  background-color: #d32f2f;
-}
-
-.indicatorGreen {
-  background-color: #388e3c;
-}
-
-/* =========================================
-   ГЛОБАЛЬНІ ПЕРЕВИЗНАЧЕННЯ ДЛЯ REACT-DATEPICKER
-   ========================================= */
-:global(.react-datepicker) {
-  font-family: inherit !important;
-  font-size: 1.05rem !important;
-  border: 1px solid var(--color-border) !important;
-  border-radius: 12px !important;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15) !important;
-  background-color: #ffffff !important;
-  padding: 8px !important;
-}
-
-:global(.react-datepicker__header) {
-  background-color: #ffffff !important;
-  border-bottom: 1px solid #e0e0e0 !important;
-  padding-top: 12px !important;
-}
-
-:global(.react-datepicker__day-name) {
-  color: #888888 !important;
-  font-weight: 600 !important;
-}
-
-:global(.react-datepicker__day-name),
-:global(.react-datepicker__day),
-:global(.react-datepicker__time-name) {
-  width: 2.8rem !important;
-  line-height: 2.8rem !important;
-  margin: 0.2rem !important;
-}
-
-:global(.react-datepicker__day) {
-  position: relative !important;
-  overflow: visible !important;
-}
-
-:global(.react-datepicker__day--selected),
-:global(.react-datepicker__day--keyboard-selected) {
-  background-color: #cfa85c !important;
-  color: #2c2c2c !important;
-  font-weight: bold !important;
-  border-radius: 8px !important;
-}
-
-:global(.react-datepicker__day:hover) {
-  background-color: #f0f0f0 !important;
-  border-radius: 8px !important;
-  color: #222222 !important;
-}
-
-:global(.react-datepicker__day:focus),
-:global(.react-datepicker__month-container:focus) {
-  outline: none !important;
-}
-
-/* --- ПОШУК ТА ФІЛЬТРИ --- */
-.searchContainer {
-  position: relative;
-  width: 100%;
-}
-
-.searchIcon {
-  position: absolute;
-  left: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: #aaaaaa;
-  font-size: 0.9rem;
-}
-
-.searchInput {
-  width: 100%;
-  padding: 10px 14px 10px 36px;
-  border-radius: 6px;
-  border: 1px solid #cfa85c;
-  background-color: #1a1a1a;
-  color: #ffffff;
-  font-size: 0.95rem;
-  box-sizing: border-box;
-}
-
-.searchInput::placeholder {
-  color: #888888;
-}
-
-.searchInput:focus {
-  outline: none;
-  box-shadow: 0 0 0 2px rgba(207, 168, 92, 0.4);
-}
-
-.filtersContainer {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  width: 100%;
-}
-
-.filterSelect {
-  flex: 1;
-  min-width: 120px;
-  padding: 10px 12px;
-  border-radius: 6px;
-  border: 1px solid #444444;
-  background-color: #1a1a1a;
-  color: #ffffff;
-  font-size: 0.9rem;
-  cursor: pointer;
-  box-sizing: border-box;
-}
-
-.filterSelect:focus {
-  outline: none;
-  border-color: #cfa85c;
-}
-
-/* --- КОНТЕНТ ТА РОЗДІЛЬНИКИ --- */
-.content {
-  background-color: #ffffff;
-  min-height: 500px;
-}
-
-.loadingText,
-.noEvents {
-  text-align: center;
-  padding: 40px 20px;
-  color: #666666;
-  font-size: 1.05rem;
-}
-
-.listContainer {
-  display: flex;
-  flex-direction: column;
-}
-
-.dayGroup {
-  display: flex;
-  flex-direction: column;
-}
-
-.sectionHeader {
-  background-color: #e8e6df;
-  color: #4a4a4a;
-  padding: 12px 20px;
-  font-size: 0.95rem;
-  font-weight: 600;
-  border-top: 1px solid #dcdad3;
-  border-bottom: 1px solid #dcdad3;
-}
-
-:root[data-theme="dark"] .sectionHeader {
-  background-color: #2a2a2a;
-  color: #d1d1d1;
-  border-color: #444;
-}
-
-/* --- СІТКА КАРТОК (АДАПТИВНА) --- */
-.cardsList {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0;
-}
-
-.card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  background-color: #ffffff;
-  border-bottom: 1px solid #e0e0e0;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.card:hover {
-  background-color: #f9f9f9;
-}
-
-:root[data-theme="dark"] .card {
-  background-color: #1a1a1a;
-  border-bottom: 1px solid #333;
-}
-
-.cardContent {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-right: 12px;
-}
-
-.cardTitle {
-  font-size: 1rem;
-  font-weight: 600;
-  color: #222222 !important;
-  line-height: 1.4;
-}
-
-.cardAddress {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: 0.9rem;
-  color: #555555 !important;
-}
-
-.pinIcon {
-  color: #b02a48;
-  margin-top: 2px;
-  flex-shrink: 0;
-  font-size: 1.1rem;
-}
-
-.cardNotes {
-  font-size: 0.95rem;
-  color: #444444 !important;
-  margin-top: 4px;
-  line-height: 1.5;
-}
-
-.confirmBtn {
-  margin-top: 6px;
-  background-color: #90273c;
-  color: #ffffff !important;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 0.9rem;
-  font-weight: 600;
-  align-self: flex-start;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.confirmBtn:hover {
-  background-color: #7a2032;
-}
-
-.chevronIcon {
-  color: #aaaaaa;
-  font-size: 1.8rem;
-  opacity: 0.8;
-}
-
-/* =========================================
-   ДЕСКТОПНА ВЕРСІЯ
-   ========================================= */
-@media (min-width: 768px) {
-  .cardsList {
-    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-    gap: 16px;
-    padding: 16px 20px;
-    background-color: #fcfcfc;
-  }
-
-  .card {
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
-    border-bottom: 1px solid #e0e0e0 !important;
-  }
-
-  .card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  }
-}
-
-/* =========================================
-   ПОВНІСТЮ МОБІЛЬНА ВЕРСІЯ (На весь екран)
-   ========================================= */
+/* Shell changes apply only while Calendar is mounted; AssignedWorkers is intact. */
+:global(div):has(> :global(main) .calendarContainer) { max-width: none; }
+:global(main):has(.calendarContainer) { padding-inline: clamp(12px, 2vw, 32px); }
+.calendarContainer { width: 100%; min-width: 0; padding-bottom: 32px; color: var(--color-text-primary); }
+.calendarContainer * { box-sizing: border-box; }
+.pageHeading { margin: 4px 0 20px; }
+.pageHeading h1 { margin: 0 0 4px; font-size: clamp(26px, 3vw, 36px); letter-spacing: -.04em; }
+.pageHeading p { margin: 0; color: var(--color-text-secondary); }
+.navbar { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; justify-content: space-between; padding: 12px; background: #292929; color: #f3e1ba; border-radius: 10px; }
+.navGroup, .viewControls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.iconBtn, .textBtn, .datePickerBtn { font: inherit; cursor: pointer; min-height: 44px; border: 1px solid #b89450; border-radius: 7px; background: transparent; color: #edd59e; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 12px; }
+.iconBtn { width: 44px; flex-shrink: 0; }
+.datePickerBtn { color: #222; background: #faf8f3; font-weight: 650; font-size: .88rem; }
+.textBtn[aria-pressed="true"], .projectTabs button[aria-pressed="true"] { background: #d9b469; color: #24211a; border-color: #d9b469; }
+.calendarContainer button:disabled { opacity: .55; cursor: wait; }
+.calendarContainer button:focus-visible, .calendarContainer input:focus-visible, .calendarContainer select:focus-visible, .card:focus-visible { outline: 3px solid #b89450; outline-offset: 3px; }
+.filterBar { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+.searchContainer { display: flex; align-items: center; gap: 10px; flex: 2 1 280px; padding-inline: 12px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 7px; min-width: 0; }
+.searchContainer svg { flex-shrink: 0; color: var(--color-text-secondary); }
+.searchContainer input { width: 100%; min-width: 0; min-height: 44px; border: 0; background: transparent; color: inherit; font: inherit; font-size: .88rem; }
+.filterBar > select { flex: 1 1 145px; width: 0; min-width: 145px; min-height: 44px; border: 1px solid var(--color-border); border-radius: 7px; padding: 8px; background: var(--color-surface); color: var(--color-text-primary); font: inherit; font-size: .85rem; }
+.projectTabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.projectTabs button { min-height: 44px; padding: 8px 12px; background: var(--color-surface); color: var(--color-text-primary); border: 1px solid var(--color-border); border-radius: 7px; cursor: pointer; font: inherit; font-size: .85rem; }
+.overview { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin: 14px 0; }
+.overview p { margin: 0; font-size: .9rem; }
+.overview small { display: block; margin-top: 4px; color: var(--color-text-secondary); font-size: .75rem; }
+.summaryDivider { margin: 0 12px; color: var(--color-text-secondary); }
+.expandButton, .moreButton { min-height: 44px; padding: 8px 14px; border: 1px solid var(--color-border); border-radius: 7px; cursor: pointer; background: var(--color-surface); color: var(--color-text-primary); font: inherit; font-size: .85rem; }
+.weekRows { display: flex; flex-direction: column; gap: 10px; }
+.dayRow { display: grid; grid-template-columns: 140px minmax(0, 1fr); background: var(--color-background); border: 1px solid var(--color-border); border-radius: 10px; overflow: hidden; }
+.dayLabel { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 16px; background: var(--color-surface); color: var(--color-text-primary); }
+.dayLabel h2 { font-size: 1.1rem; text-transform: uppercase; margin: 0; }
+.dayLabel time, .dayLabel > span { font-size: .82rem; }
+.dayLabel small { font-size: .7rem; font-weight: 700; }
+.today .dayLabel { background: #d9b469; color: #24211a; }
+.dayBody { padding: 10px; min-width: 0; }
+.cardsGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 245px), 1fr)); gap: 10px; }
+.card { min-width: 0; padding: 12px; border: 1px solid var(--color-border); border-left: 4px solid #d2a340; border-radius: 8px; background: var(--color-surface); color: var(--color-text-primary); text-decoration: none; display: flex; flex-direction: column; gap: 5px; transition: box-shadow .15s, border-color .15s; }
+.card:hover { box-shadow: var(--shadow-md, 0 3px 12px #0002); border-color: #b89450; }
+.assigned, .ready { border-left-color: #43a563; }
+.cardAddress { font-size: .94rem; line-height: 1.35; overflow-wrap: anywhere; }
+.cardMeta, .store, .notes { font-size: .78rem; color: var(--color-text-secondary); line-height: 1.4; overflow-wrap: anywhere; }
+.store { font-size: .72rem; }
+.notes { white-space: pre-wrap; }
+.cardFooter { margin-top: auto; padding-top: 7px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: space-between; }
+.workers { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.worker, .unassignedLabel, .status { border-radius: 12px; padding: 4px 8px; font-size: .7rem; font-weight: 600; overflow-wrap: anywhere; }
+.worker { background: #e1f1e5; color: #245e36; }
+.unassignedLabel, .statusProgress { background: #fff0c9; color: #79540d; }
+.statusReady { background: #dcefe0; color: #226033; }
+.statusUnfinished { background: #fbe1e4; color: #9a2836; }
+.moreButton { margin-top: 8px; }
+.empty, .loadingText { margin: 0; padding: 20px 10px; color: var(--color-text-secondary); font-size: .88rem; }
+.dateCell { position: relative; }
+.indicator { position: absolute; bottom: 1px; left: calc(50% - 3px); width: 6px; height: 6px; border-radius: 50%; }
+.indicatorRed { background: #d32f2f; }
+.indicatorGreen { background: #388e3c; }
+.customCalendar { background: var(--color-surface) !important; border-color: var(--color-border) !important; color: var(--color-text-primary) !important; font-family: inherit !important; }
+.customCalendar :global(.react-datepicker__header) { background: var(--color-surface); border-color: var(--color-border); }
+.customCalendar :global(.react-datepicker__current-month), .customCalendar :global(.react-datepicker__day-name), .customCalendar :global(.react-datepicker__day) { color: var(--color-text-primary); }
+.customCalendar :global(.react-datepicker__day--outside-month) { opacity: .5; }
+.customCalendar :global(.react-datepicker__day--selected), .customCalendar :global(.react-datepicker__day--keyboard-selected) { background: #d9b469; color: #24211a; }
+.customCalendar :global(.react-datepicker__day:hover) { background: #d9b469; color: #24211a; }
 @media (max-width: 767px) {
-  .calendarContainer {
-    padding: 0;
-    width: 100vw;
-    margin-left: calc(-50vw + 50%);
-    margin-right: calc(-50vw + 50%);
-  }
-
-  .mobileLayout {
-    border-radius: 0;
-    border: none;
-    box-shadow: none;
-  }
-
-  .navbar {
-    top: 60px;
-    padding: 16px 12px;
-  }
-
-  .sectionHeader {
-    padding: 10px 12px;
-  }
-
-  .card {
-    padding: 14px 12px;
-  }
-
-  .loadingText,
-  .noEvents {
-    padding: 30px 10px;
-  }
-
-  .filterSelect {
-    flex: 1 1 calc(50% - 5px); /* На мобільних по 2 селектора в ряд */
-  }
-}
-/* --- ГОЛОВНИЙ ЗАГОЛОВОК ДНЯ --- */
-.dateMainHeader {
-  background-color: #2c2c2c;
-  color: #cfa85c;
-  padding: 14px 20px;
-  font-size: 1.15rem;
-  font-weight: 700;
-  text-align: center;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  position: sticky;
-  top: 190px; /* Липка дата під фільтрами */
-  z-index: 40;
-  border-bottom: 2px solid #1a1a1a;
-}
-
-/* --- ЗАГОЛОВОК МАГАЗИНУ ТА ТИПУ (Підзаголовок) --- */
-.sectionHeader {
-  background-color: #e8e6df;
-  color: #4a4a4a;
-  padding: 10px 20px;
-  font-size: 0.95rem;
-  font-weight: 600;
-  border-bottom: 1px solid #dcdad3;
-}
-
-:root[data-theme="dark"] .sectionHeader {
-  background-color: #2a2a2a;
-  color: #d1d1d1;
-  border-color: #444;
-}
-
-/* Обгортка для конкретного магазину в межах одного дня */
-.storeSection {
-  display: flex;
-  flex-direction: column;
-}
-
-@media (max-width: 767px) {
-  /* Filter wrapping changes the height; fixed sticky offsets can cover cards. */
-  .navbar, .dateMainHeader { position: static; }
-  :global(.react-datepicker__day-name),
-  :global(.react-datepicker__day),
-  :global(.react-datepicker__time-name) {
-    width: 2rem !important;
-    line-height: 2rem !important;
-    margin: 0.15rem !important;
-  }
+  .dayRow { grid-template-columns: 1fr; }
+  .dayLabel { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 12px; }
+  .dayLabel > span { margin-left: auto; }
+  .cardsGrid { grid-template-columns: 1fr; }
+  .navGroup { width: 100%; }
+  .navGroup :global(.react-datepicker-wrapper) { flex: 1; min-width: 0; }
+  .datePickerBtn { width: 100%; font-size: .75rem; padding: 8px; }
+  .datePickerBtn svg { display: none; }
+  .navbar { gap: 10px; }
+  .textBtn { font-size: .8rem; }
+  .filterBar > select { min-width: 0; flex-basis: calc(50% - 5px); }
+  .searchContainer, .projectTabs { flex-basis: 100%; }
+  .projectTabs button { flex: 1; }
 }
