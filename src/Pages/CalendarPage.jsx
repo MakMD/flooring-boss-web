@@ -36,7 +36,9 @@ const STORAGE_KEY = "calendar_state";
 const EXPIRATION_TIME = 3 * 60 * 1000;
 
 const CalendarPage = () => {
-  const assignedWorkersButton = useContext(AssignedWorkersContext);
+  const assignments = useContext(AssignedWorkersContext);
+  const assignedWorkersButton = assignments?.button;
+  const setAssignmentPeriod = assignments?.setPeriod;
   const [selectedDate, setSelectedDate] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -94,7 +96,6 @@ const CalendarPage = () => {
   const [calendarMonth, setCalendarMonth] = useState(selectedDate);
   const [monthEvents, setMonthEvents] = useState([]);
 
-  const [expandedDays, setExpandedDays] = useState({});
   const [loadError, setLoadError] = useState(false);
   const requestVersion = useRef(null);
   const weekStartsOn = 1;
@@ -275,9 +276,11 @@ const CalendarPage = () => {
 
   const dateKey = format(selectedDate, "yyyy-MM-dd");
   const datesToRender = useMemo(() => calendarDays(dateKey, viewMode), [dateKey, viewMode]);
+  useEffect(() => {
+    setAssignmentPeriod?.({ start: datesToRender[0], end: datesToRender.at(-1) });
+  }, [datesToRender, setAssignmentPeriod]);
   const summary = calendarSummary(filteredEvents);
   const todayKey = format(calgaryToday(), "yyyy-MM-dd");
-  const allExpanded = datesToRender.every((key) => expandedDays[key]);
   const addressCount = allEvents.filter((event) => event.project_type === "Address").length;
   const serviceCount = allEvents.filter((event) => event.project_type === "Service").length;
   const goToCurrentWeek = () => {
@@ -328,44 +331,60 @@ const CalendarPage = () => {
         <button type="button" aria-pressed={projectTab === "Address"} onClick={() => setProjectTab("Address")}><FaBuilding /> Адреси ({loading ? "…" : addressCount})</button>
         <button type="button" aria-pressed={projectTab === "Service"} onClick={() => setProjectTab("Service")}><FaWrench /> Сервіси ({loading ? "…" : serviceCount})</button>
       </div>
-      <button type="button" className={styles.expandButton} disabled={loading || loadError} aria-expanded={allExpanded}
-        onClick={() => setExpandedDays(Object.fromEntries(datesToRender.map((key) => [key, !allExpanded])))}>
-        {allExpanded ? "Згорнути всі дні" : "Розгорнути всі дні"}
-      </button>
     </div>
     </div>
     {loading ? <p className={styles.loadingText}>Loading schedule...</p> : loadError ? <div role="alert" className={styles.empty}>Не вдалося завантажити календар. <button type="button" onClick={fetchEvents}>Спробувати ще раз</button></div> :
-      <div className={`${styles.weekRows} ${viewMode === "day" ? styles.dayView : ""}`}>{datesToRender.map((key) => <CalendarDay key={key} dateKey={key} weekView={viewMode === "week"}
-        events={filteredEvents.filter((event) => event.date === key)} today={key === todayKey}
-        expanded={!!expandedDays[key]} onToggle={() => setExpandedDays((old) => ({ ...old, [key]: !old[key] }))} />)}</div>}
+      <div className={styles.weekRows}>{datesToRender.map((key) => <CalendarDay key={key} dateKey={key}
+        events={filteredEvents.filter((event) => event.date === key)} today={key === todayKey} />)}</div>}
   </section>;
 };
 
-function CalendarDay({ dateKey, events, today, expanded, onToggle, weekView }) {
+function CalendarDay({ dateKey, events, today }) {
   const grid = useRef(null);
-  const [columns, setColumns] = useState(1);
+  const [position, setPosition] = useState({ first: 0, last: 0, back: false, next: false });
+  const eventIds = events.map(event => event.id).join(",");
   useEffect(() => {
     const element = grid.current;
     const measure = () => {
-      const tracks = getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean);
-      setColumns(Math.max(1, tracks.length));
+      const bounds = element.getBoundingClientRect();
+      const visible = [...element.children].map((child, index) => ({ bounds: child.getBoundingClientRect(), index }))
+        .filter(child => child.bounds.right > bounds.left + 2 && child.bounds.left < bounds.right - 2);
+      setPosition({ first: visible.length ? visible[0].index + 1 : 0,
+        last: visible.length ? visible.at(-1).index + 1 : 0,
+        back: element.scrollLeft > 4,
+        next: element.scrollLeft + element.clientWidth < element.scrollWidth - 4 });
     };
+    element.scrollLeft = 0;
     const observer = new ResizeObserver(measure);
     observer.observe(element);
+    element.addEventListener("scroll", measure, { passive: true });
     measure();
-    return () => observer.disconnect();
-  }, []);
-  const visibleLimit = weekView ? 4 : columns;
-  const visible = expanded ? events : events.slice(0, visibleLimit);
+    return () => { observer.disconnect(); element.removeEventListener("scroll", measure); };
+  }, [eventIds]);
+  const scrollCards = (direction) => {
+    const element = grid.current;
+    element.scrollBy({ left: direction * element.clientWidth,
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+  };
   const date = calendarDate(dateKey);
   return <section className={`${styles.dayRow} ${today ? styles.today : ""}`} aria-label={format(date, "EEEE, MMM d, yyyy")}>
     <header className={styles.dayLabel}>
       <h2>{format(date, "EEE d")}</h2><time dateTime={dateKey}>{format(date, "MMM d, yyyy")}</time>
       <span>{events.length} проєктів · {calendarSummary(events).unassigned} непризначених</span>{today && <small>Сьогодні</small>}
+      {events.length > 0 && <div className={styles.scrollControls}>
+        <button type="button" aria-label={`Попередні проєкти ${dateKey}`} aria-controls={`calendar-${dateKey}`} disabled={!position.back} onClick={() => scrollCards(-1)}><FaChevronLeft /></button>
+        <span aria-live="polite" aria-atomic="true">{position.first}–{position.last} / {events.length}</span>
+        <button type="button" aria-label={`Наступні проєкти ${dateKey}`} aria-controls={`calendar-${dateKey}`} disabled={!position.next} onClick={() => scrollCards(1)}><FaChevronRight /></button>
+      </div>}
     </header>
     <div className={styles.dayBody}>
-      <div ref={grid} id={`calendar-${dateKey}`} className={styles.cardsGrid}>
-        {visible.map((event) => {
+      <div ref={grid} id={`calendar-${dateKey}`} className={styles.cardsGrid} tabIndex={events.length ? 0 : undefined}
+        role="region" aria-label={`Проєкти ${dateKey}`} onKeyDown={(event) => {
+          if (event.target === event.currentTarget && ["ArrowLeft", "ArrowRight"].includes(event.key)) {
+            event.preventDefault(); scrollCards(event.key === "ArrowLeft" ? -1 : 1);
+          }
+        }}>
+        {events.map((event) => {
           const workers = calendarWorkers(event);
           // Only the address/project status marks the whole card complete.
           const ready = ["Ready", "Completed"].includes(event.status);
@@ -386,9 +405,6 @@ function CalendarDay({ dateKey, events, today, expanded, onToggle, weekView }) {
         })}
       </div>
       {!events.length && <p className={styles.empty}>Немає проєктів за поточними фільтрами.</p>}
-      {events.length > visibleLimit && <button type="button" className={styles.moreButton} aria-expanded={expanded} aria-controls={`calendar-${dateKey}`} onClick={onToggle}>
-        {expanded ? "Згорнути" : `Ще ${events.length - visible.length} · показати всі ${events.length}`}
-      </button>}
     </div>
   </section>;
 }

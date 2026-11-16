@@ -30,20 +30,21 @@
 .summaryBadges > span { padding: 6px 9px; border-radius: 6px; background: #faf8f3; color: #24211a; }
 .summaryBadges > .summaryUnassigned { background: #fff0c9; color: #79540d; }
 .expandButton, .moreButton { min-height: 44px; padding: 8px 14px; border: 1px solid var(--color-border); border-radius: 7px; cursor: pointer; background: var(--color-surface); color: var(--color-text-primary); font: inherit; font-size: .85rem; }
-.weekRows { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; align-items: start; }
-.dayRow { min-width: 0; background: var(--color-background); border-radius: 8px; }
+.weekRows { display: flex; flex-direction: column; gap: 10px; }
+.dayRow { display: grid; grid-template-columns: 180px minmax(0, 1fr); min-width: 0; background: var(--color-background); border: 1px solid var(--color-border); border-radius: 8px; }
 .dayLabel { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px; border-radius: 7px; background: var(--color-surface); color: var(--color-text-primary); min-height: 110px; }
 .dayLabel h2 { font-size: 1.1rem; text-transform: uppercase; margin: 0; }
 .dayLabel time, .dayLabel > span { font-size: .82rem; overflow-wrap: anywhere; }
 .dayLabel small { font-size: .7rem; font-weight: 700; }
 .today .dayLabel { background: #d9b469; color: #24211a; }
-.dayBody { padding: 8px 0; min-width: 0; }
-.cardsGrid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
-.weekRows:not(.dayView) .card { padding: 10px 8px; gap: 4px; }
-.weekRows:not(.dayView) .cardAddress { font-size: .84rem; }
-.dayView { grid-template-columns: minmax(0, 1fr); }
-.dayView .dayLabel { min-height: 0; }
-.dayView .cardsGrid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 245px), 1fr)); }
+.dayBody { padding: 8px; min-width: 0; }
+.cardsGrid { display: grid; grid-auto-flow: column; grid-auto-columns: min(100%, 260px); gap: 8px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; padding: 3px 3px 10px; scrollbar-width: thin; scrollbar-color: #b89450 transparent; }
+.cardsGrid:focus-visible { outline: 2px solid #b89450; outline-offset: -2px; }
+.cardsGrid .card { scroll-snap-align: start; }
+.scrollControls { display: flex; align-items: center; justify-content: space-between; gap: 4px; width: 100%; margin-top: auto; padding-top: 8px; }
+.scrollControls button { display: inline-flex; align-items: center; justify-content: center; width: 38px; min-height: 44px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface); color: var(--color-text-primary); cursor: pointer; flex-shrink: 0; }
+.scrollControls span { font-size: .75rem; font-variant-numeric: tabular-nums; }
+.scrollControls button:disabled { cursor: default; opacity: .35; }
 .card { min-width: 0; padding: 12px; border: 1px solid var(--color-border); border-left: 4px solid #d2a340; border-radius: 8px; background: var(--color-surface); color: var(--color-text-primary); text-decoration: none; display: flex; flex-direction: column; gap: 5px; transition: box-shadow .15s, border-color .15s; }
 .card:hover { box-shadow: var(--shadow-md, 0 3px 12px #0002); border-color: #b89450; }
 .ready { background: #f0f8f2; border-left-color: #43a563; }
@@ -76,12 +77,10 @@
 .customCalendar :global(.react-datepicker__day--outside-month) { opacity: .5; }
 .customCalendar :global(.react-datepicker__day--selected), .customCalendar :global(.react-datepicker__day--keyboard-selected) { background: #d9b469; color: #24211a; }
 .customCalendar :global(.react-datepicker__day:hover) { background: #d9b469; color: #24211a; }
-@media (max-width: 1279px) { .weekRows:not(.dayView) { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-@media (max-width: 991px) { .weekRows:not(.dayView) { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 767px) {
-  .weekRows:not(.dayView) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dayRow { grid-template-columns: 1fr; }
-  .cardsGrid { grid-template-columns: 1fr; }
+  .dayLabel { min-height: 0; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+  .scrollControls { width: auto; margin-left: auto; padding-top: 0; }
   .navGroup { width: 100%; }
   .navGroup :global(.react-datepicker-wrapper) { flex: 1; min-width: 0; }
   .datePickerBtn { width: 100%; font-size: .75rem; padding: 8px; }
@@ -91,11 +90,6 @@
   .extraFilters > select { flex-basis: 100%; }
   .searchContainer, .projectTabs { flex-basis: 100%; }
   .projectTabs button { flex: 1; }
-}
-@media (max-width: 519px) {
-  .weekRows:not(.dayView) { grid-template-columns: minmax(0, 1fr); }
-  .dayLabel { min-height: 0; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
-  .dayLabel > span { flex-basis: 100%; }
 }
 @media (max-width: 1100px) {
   .filterToggle { display: inline-flex; align-items: center; }
