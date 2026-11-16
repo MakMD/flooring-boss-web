@@ -4,8 +4,10 @@ import { Link } from "react-router-dom";
 import { supabase } from "../../supabaseClient";
 import { activeAssignments, assignmentWindow } from "../../utils/activeAssignments";
 import styles from "./AssignedWorkers.module.css";
+import { AssignedWorkersContext } from "./AssignedWorkersContext";
 
 export default function AssignedWorkers({ children, defaultOpen = false, pathname }) {
+  const calendarDrawer = pathname?.replace(/\/$/, "") === "/calendar";
   const [desktop, setDesktop] = useState(() => window.matchMedia("(min-width: 1101px)").matches);
   const [expanded, setExpanded] = useState(defaultOpen);
   const [refreshing, setRefreshing] = useState(false);
@@ -14,6 +16,7 @@ export default function AssignedWorkers({ children, defaultOpen = false, pathnam
   const [error, setError] = useState(false);
   const dialog = useRef(null);
   const trigger = useRef(null);
+  const closeButton = useRef(null);
   const request = useRef(0);
   const inFlight = useRef(false);
   const pendingRefresh = useRef(false);
@@ -103,12 +106,12 @@ export default function AssignedWorkers({ children, defaultOpen = false, pathnam
   useEffect(() => {
     const media = window.matchMedia("(min-width: 1101px)");
     const onChange = () => {
-      dialog.current?.close();
+      if (!calendarDrawer) dialog.current?.close();
       setDesktop(media.matches);
     };
     media.addEventListener("change", onChange);
     return () => media.removeEventListener("change", onChange);
-  }, []);
+  }, [calendarDrawer]);
 
   const { today, tomorrow } = assignmentWindow();
   const activeTasks = activeAssignments(tasks);
@@ -157,27 +160,34 @@ export default function AssignedWorkers({ children, defaultOpen = false, pathnam
     </button>
   );
 
-  return (
-    <div className={`${styles.shell} ${desktop && expanded ? styles.expanded : ""}`}>
-      <div className={styles.toolbar}>
-        <button ref={trigger} className={styles.toggleButton}
-          aria-expanded={desktop ? expanded : undefined}
-          aria-controls={desktop ? "assignments-panel" : "assignments-dialog"}
-          aria-haspopup={desktop ? undefined : "dialog"}
+  const inlinePanel = desktop && !calendarDrawer;
+  const triggerButton = <button ref={trigger} className={styles.toggleButton}
+          aria-expanded={inlinePanel ? expanded : undefined}
+          aria-controls={inlinePanel ? "assignments-panel" : "assignments-dialog"}
+          aria-haspopup={inlinePanel ? undefined : "dialog"}
           onClick={() => {
-            if (desktop) setExpanded((value) => !value);
-            else dialog.current?.showModal();
-            if (!desktop || !expanded) refresh();
+            if (inlinePanel) setExpanded((value) => !value);
+            else {
+              dialog.current?.showModal();
+              if (calendarDrawer) closeButton.current?.focus();
+            }
+            if (!inlinePanel || !expanded) refresh();
           }}>
           <FaUsers aria-hidden="true" />
           <span>Assigned workers</span>
           {!loading && !error && <span className={styles.count}>{activeTasks.length} {activeTasks.length === 1 ? "job" : "jobs"}</span>}
-          {desktop && (expanded ? <FaChevronLeft aria-hidden="true" /> : <FaChevronRight aria-hidden="true" />)}
-        </button>
-        <span className={styles.period}>Today &amp; tomorrow · Calgary</span>
-      </div>
+          {inlinePanel && (expanded ? <FaChevronLeft aria-hidden="true" /> : <FaChevronRight aria-hidden="true" />)}
+        </button>;
 
-      {desktop && expanded && (
+  return (
+    <AssignedWorkersContext.Provider value={calendarDrawer ? triggerButton : null}>
+    <div className={`${styles.shell} ${inlinePanel && expanded ? styles.expanded : ""}`}>
+      {!calendarDrawer && <div className={styles.toolbar}>
+        {triggerButton}
+        <span className={styles.period}>Today &amp; tomorrow · Calgary</span>
+      </div>}
+
+      {inlinePanel && expanded && (
         <aside id="assignments-panel" className={styles.panel} aria-label="Assigned workers"
           onKeyDown={(event) => {
             if (event.key === "Escape") { setExpanded(false); trigger.current?.focus(); }
@@ -196,18 +206,28 @@ export default function AssignedWorkers({ children, defaultOpen = false, pathnam
       )}
       <div className={styles.page}>{children}</div>
 
-      {!desktop && <dialog id="assignments-dialog" ref={dialog} className={styles.dialog}
+      {!inlinePanel && <dialog id="assignments-dialog" ref={dialog} className={`${styles.dialog} ${calendarDrawer ? styles.calendarDrawer : ""}`}
         aria-labelledby="assignments-title" onClose={() => trigger.current?.focus()}
+        onKeyDown={(event) => {
+          if (!calendarDrawer || event.key !== "Tab") return;
+          const controls = [...event.currentTarget.querySelectorAll('button:not(:disabled), a[href], [tabindex="0"]')];
+          const index = controls.indexOf(document.activeElement);
+          if (index < 0 || (!event.shiftKey && index === controls.length - 1) || (event.shiftKey && index === 0)) {
+            event.preventDefault();
+            (event.shiftKey ? controls.at(-1) : controls[0])?.focus();
+          }
+        }}
         onClick={(event) => { if (event.target === dialog.current) dialog.current.close(); }}>
         <div className={styles.panelHeader}>
           <h2 id="assignments-title"><FaUsers aria-hidden="true" /> Assigned workers</h2>
           {refreshButton}
-          <button autoFocus className={styles.iconButton} aria-label="Close assigned workers"
+          <button ref={closeButton} autoFocus className={styles.iconButton} aria-label="Close assigned workers"
             onClick={() => dialog.current.close()}><FaTimes aria-hidden="true" /></button>
         </div>
         <p className={styles.caption}>Today &amp; tomorrow · Calgary time</p>
         {content}
       </dialog>}
     </div>
+    </AssignedWorkersContext.Provider>
   );
 }

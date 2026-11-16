@@ -1,7 +1,12 @@
 /* Shell changes apply only while Calendar is mounted; AssignedWorkers is intact. */
 :global(div):has(> :global(main) .calendarContainer) { max-width: none; }
+:global(div):has(> :global(main) .calendarContainer) > :global(header) { margin-inline: 0; padding-inline: clamp(12px, 2vw, 32px); }
 :global(main):has(.calendarContainer) { padding-inline: clamp(12px, 2vw, 32px); }
-.calendarContainer { width: 100%; min-width: 0; padding-bottom: 32px; color: var(--color-text-primary); }
+.calendarContainer { width: 100%; max-width: 100%; min-width: 0; padding-bottom: 32px; color: var(--color-text-primary); }
+.stickyControls { position: sticky; top: var(--calendar-header-height, 0px); z-index: 20; background: var(--color-background); padding-block: 8px; }
+.extraFilters { display: flex; flex: 3 1 440px; flex-wrap: wrap; gap: 10px; min-width: 0; }
+.filterToggle { display: none; }
+.expandButton[aria-pressed="true"] { background: #fff0c9; color: #79540d; border-color: #cfa85c; }
 .calendarContainer * { box-sizing: border-box; }
 .pageHeading { margin: 4px 0 20px; }
 .pageHeading h1 { margin: 0 0 4px; font-size: clamp(26px, 3vw, 36px); letter-spacing: -.04em; }
@@ -18,27 +23,36 @@
 .searchContainer { display: flex; align-items: center; gap: 10px; flex: 2 1 280px; padding-inline: 12px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 7px; min-width: 0; }
 .searchContainer svg { flex-shrink: 0; color: var(--color-text-secondary); }
 .searchContainer input { width: 100%; min-width: 0; min-height: 44px; border: 0; background: transparent; color: inherit; font: inherit; font-size: .88rem; }
-.filterBar > select { flex: 1 1 145px; width: 0; min-width: 145px; min-height: 44px; border: 1px solid var(--color-border); border-radius: 7px; padding: 8px; background: var(--color-surface); color: var(--color-text-primary); font: inherit; font-size: .85rem; }
+.extraFilters > select { flex: 1 1 145px; width: 0; min-width: 0; min-height: 44px; border: 1px solid var(--color-border); border-radius: 7px; padding: 8px; background: var(--color-surface); color: var(--color-text-primary); font: inherit; font-size: .85rem; }
 .projectTabs { display: flex; gap: 4px; flex-wrap: wrap; }
 .projectTabs button { min-height: 44px; padding: 8px 12px; background: var(--color-surface); color: var(--color-text-primary); border: 1px solid var(--color-border); border-radius: 7px; cursor: pointer; font: inherit; font-size: .85rem; }
-.overview { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin: 14px 0; }
-.overview p { margin: 0; font-size: .9rem; }
-.overview small { display: block; margin-top: 4px; color: var(--color-text-secondary); font-size: .75rem; }
-.summaryDivider { margin: 0 12px; color: var(--color-text-secondary); }
+.summaryBadges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: .75rem; }
+.summaryBadges > span { padding: 6px 9px; border-radius: 6px; background: #faf8f3; color: #24211a; }
+.summaryBadges > .summaryUnassigned { background: #fff0c9; color: #79540d; }
 .expandButton, .moreButton { min-height: 44px; padding: 8px 14px; border: 1px solid var(--color-border); border-radius: 7px; cursor: pointer; background: var(--color-surface); color: var(--color-text-primary); font: inherit; font-size: .85rem; }
-.weekRows { display: flex; flex-direction: column; gap: 10px; }
-.dayRow { display: grid; grid-template-columns: 140px minmax(0, 1fr); background: var(--color-background); border: 1px solid var(--color-border); border-radius: 10px; overflow: hidden; }
-.dayLabel { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 16px; background: var(--color-surface); color: var(--color-text-primary); }
+.weekRows { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; align-items: start; }
+.dayRow { min-width: 0; background: var(--color-background); border-radius: 8px; }
+.dayLabel { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px; border-radius: 7px; background: var(--color-surface); color: var(--color-text-primary); min-height: 110px; }
 .dayLabel h2 { font-size: 1.1rem; text-transform: uppercase; margin: 0; }
-.dayLabel time, .dayLabel > span { font-size: .82rem; }
+.dayLabel time, .dayLabel > span { font-size: .82rem; overflow-wrap: anywhere; }
 .dayLabel small { font-size: .7rem; font-weight: 700; }
 .today .dayLabel { background: #d9b469; color: #24211a; }
-.dayBody { padding: 10px; min-width: 0; }
-.cardsGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 245px), 1fr)); gap: 10px; }
+.dayBody { padding: 8px 0; min-width: 0; }
+.cardsGrid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.weekRows:not(.dayView) .card { padding: 10px 8px; gap: 4px; }
+.weekRows:not(.dayView) .cardAddress { font-size: .84rem; }
+.dayView { grid-template-columns: minmax(0, 1fr); }
+.dayView .dayLabel { min-height: 0; }
+.dayView .cardsGrid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 245px), 1fr)); }
 .card { min-width: 0; padding: 12px; border: 1px solid var(--color-border); border-left: 4px solid #d2a340; border-radius: 8px; background: var(--color-surface); color: var(--color-text-primary); text-decoration: none; display: flex; flex-direction: column; gap: 5px; transition: box-shadow .15s, border-color .15s; }
 .card:hover { box-shadow: var(--shadow-md, 0 3px 12px #0002); border-color: #b89450; }
-.assigned, .ready { border-left-color: #43a563; }
+.ready { background: #f0f8f2; border-left-color: #43a563; }
+.inProgress { background: #f4f8fd; }
+:global([data-theme="dark"]) .inProgress { background: #1b2430; }
+.ready:hover { border-left-color: #43a563; }
+:global([data-theme="dark"]) .ready { background: #1c2920; }
 .cardAddress { font-size: .94rem; line-height: 1.35; overflow-wrap: anywhere; }
+.city { font-size: .78rem; color: var(--color-text-secondary); overflow-wrap: anywhere; }
 .cardMeta, .store, .notes { font-size: .78rem; color: var(--color-text-secondary); line-height: 1.4; overflow-wrap: anywhere; }
 .store { font-size: .72rem; }
 .notes { white-space: pre-wrap; }
@@ -46,10 +60,11 @@
 .workers { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .worker, .unassignedLabel, .status { border-radius: 12px; padding: 4px 8px; font-size: .7rem; font-weight: 600; overflow-wrap: anywhere; }
 .worker { background: #e1f1e5; color: #245e36; }
-.unassignedLabel, .statusProgress { background: #fff0c9; color: #79540d; }
+.unassignedLabel { background: #fff0c9; color: #79540d; }
+.statusProgress { background: #dcecff; color: #174c88; }
 .statusReady { background: #dcefe0; color: #226033; }
 .statusUnfinished { background: #fbe1e4; color: #9a2836; }
-.moreButton { margin-top: 8px; }
+.moreButton { margin-top: 8px; width: 100%; font-size: .75rem; padding: 8px; }
 .empty, .loadingText { margin: 0; padding: 20px 10px; color: var(--color-text-secondary); font-size: .88rem; }
 .dateCell { position: relative; }
 .indicator { position: absolute; bottom: 1px; left: calc(50% - 3px); width: 6px; height: 6px; border-radius: 50%; }
@@ -61,10 +76,11 @@
 .customCalendar :global(.react-datepicker__day--outside-month) { opacity: .5; }
 .customCalendar :global(.react-datepicker__day--selected), .customCalendar :global(.react-datepicker__day--keyboard-selected) { background: #d9b469; color: #24211a; }
 .customCalendar :global(.react-datepicker__day:hover) { background: #d9b469; color: #24211a; }
+@media (max-width: 1279px) { .weekRows:not(.dayView) { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 991px) { .weekRows:not(.dayView) { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 767px) {
+  .weekRows:not(.dayView) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dayRow { grid-template-columns: 1fr; }
-  .dayLabel { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 12px; }
-  .dayLabel > span { margin-left: auto; }
   .cardsGrid { grid-template-columns: 1fr; }
   .navGroup { width: 100%; }
   .navGroup :global(.react-datepicker-wrapper) { flex: 1; min-width: 0; }
@@ -72,7 +88,18 @@
   .datePickerBtn svg { display: none; }
   .navbar { gap: 10px; }
   .textBtn { font-size: .8rem; }
-  .filterBar > select { min-width: 0; flex-basis: calc(50% - 5px); }
+  .extraFilters > select { flex-basis: 100%; }
   .searchContainer, .projectTabs { flex-basis: 100%; }
   .projectTabs button { flex: 1; }
+}
+@media (max-width: 519px) {
+  .weekRows:not(.dayView) { grid-template-columns: minmax(0, 1fr); }
+  .dayLabel { min-height: 0; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+  .dayLabel > span { flex-basis: 100%; }
+}
+@media (max-width: 1100px) {
+  .filterToggle { display: inline-flex; align-items: center; }
+  .extraFilters { display: none; flex-basis: 100%; }
+  .extraFilters.filtersOpen { display: flex; }
+  .extraFilters.filtersOpen { max-height: 30dvh; overflow-y: auto; }
 }

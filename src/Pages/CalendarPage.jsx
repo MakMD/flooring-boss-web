@@ -1,5 +1,6 @@
 // src/Pages/CalendarPage.jsx
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, useContext } from "react";
+import { AssignedWorkersContext } from "../components/AssignedWorkers/AssignedWorkersContext";
 import { Link } from "react-router-dom";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
@@ -23,16 +24,19 @@ import {
   FaSearch,
   FaBuilding,
   FaWrench,
+  FaUser,
+  FaCheck,
 } from "react-icons/fa";
 import { supabase } from "../supabaseClient";
 import toast from "react-hot-toast";
 import styles from "./CalendarPage.module.css";
-import { calgaryToday, calendarDate, calendarDays, calendarWorkers, calendarSummary, filterCalendarEvents } from "../utils/calendarView.js";
+import { calgaryToday, calendarDate, calendarDays, calendarWorkers, calendarSummary, calendarAddress, calendarUnassigned, filterCalendarEvents } from "../utils/calendarView.js";
 
 const STORAGE_KEY = "calendar_state";
 const EXPIRATION_TIME = 3 * 60 * 1000;
 
 const CalendarPage = () => {
+  const assignedWorkersButton = useContext(AssignedWorkersContext);
   const [selectedDate, setSelectedDate] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -73,6 +77,19 @@ const CalendarPage = () => {
   const [selectedBuilder, setSelectedBuilder] = useState("All");
   const [selectedStore, setSelectedStore] = useState("All");
   const [selectedStatus, setSelectedStatus] = useState("All");
+  const [onlyUnassigned, setOnlyUnassigned] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const container = useRef(null);
+
+  useEffect(() => {
+    const header = document.querySelector("main")?.previousElementSibling;
+    if (!header) return;
+    const measure = () => container.current?.style.setProperty("--calendar-header-height", `${header.getBoundingClientRect().height}px`);
+    const observer = new ResizeObserver(measure);
+    observer.observe(header);
+    measure();
+    return () => observer.disconnect();
+  }, []);
 
   const [calendarMonth, setCalendarMonth] = useState(selectedDate);
   const [monthEvents, setMonthEvents] = useState([]);
@@ -211,8 +228,8 @@ const CalendarPage = () => {
   };
 
   const filteredEvents = useMemo(() => filterCalendarEvents(allEvents, {
-    projectTab, searchQuery, selectedBuilder, selectedStore, selectedStatus,
-  }), [allEvents, projectTab, searchQuery, selectedBuilder, selectedStore, selectedStatus]);
+    projectTab, searchQuery, selectedBuilder, selectedStore, selectedStatus, onlyUnassigned,
+  }), [allEvents, projectTab, searchQuery, selectedBuilder, selectedStore, selectedStatus, onlyUnassigned]);
 
   const uniqueBuilders = useMemo(
     () =>
@@ -272,11 +289,9 @@ const CalendarPage = () => {
   const headerText = viewMode === "day" ? format(selectedDate, "MMM d, yyyy")
     : `${format(calendarDate(datesToRender[0]), "MMM d, yyyy")} – ${format(calendarDate(datesToRender[6]), "MMM d, yyyy")}`;
 
-  return <section className={styles.calendarContainer} aria-label="Calendar">
-    <header className={styles.pageHeading}>
-      <h1>Calendar</h1>
-      <p>{viewMode === "week" ? "Weekly" : "Daily"} work overview · Calgary time</p>
-    </header>
+  const activeFilters = [selectedBuilder, selectedStore, selectedStatus].filter(value => value !== "All").length;
+  return <section ref={container} className={styles.calendarContainer} aria-label="Calendar">
+    <div className={styles.stickyControls}>
     <div className={styles.navbar}>
       <div className={styles.navGroup}>
         <button type="button" onClick={handlePrev} className={styles.iconBtn} aria-label={viewMode === "week" ? "Previous week" : "Previous day"}><FaChevronLeft /></button>
@@ -288,40 +303,45 @@ const CalendarPage = () => {
         <button type="button" className={styles.textBtn} onClick={goToCurrentWeek}>Поточний тиждень</button>
         <button type="button" onClick={fetchEvents} disabled={loading} className={styles.iconBtn} aria-label="Refresh calendar"><FaSyncAlt /></button>
       </div>
+      <div className={styles.summaryBadges} role="status" title="Кількість проєктів за поточними фільтрами">
+        {loading ? "Завантаження…" : loadError ? "Календар недоступний" : <>
+          <span>{summary.total} проєктів · {viewMode === "week" ? "тиждень" : "день"}</span>
+          <span className={styles.summaryUnassigned}>{summary.unassigned} непризначених</span>
+        </>}
+      </div>
       <div className={styles.viewControls}>
+        {assignedWorkersButton}
         <button type="button" aria-pressed={viewMode === "day"} onClick={() => setViewMode("day")} className={styles.textBtn}><FaRegCalendar /> День</button>
         <button type="button" aria-pressed={viewMode === "week"} onClick={() => setViewMode("week")} className={styles.textBtn}><FaRegCalendarAlt /> Тиждень</button>
       </div>
     </div>
     <div className={styles.filterBar}>
       <label className={styles.searchContainer}><FaSearch /><input aria-label="Search address, builder or WO" placeholder="Шукати адресу, клієнта або WO..." value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} /></label>
+      <button type="button" className={styles.expandButton} aria-pressed={onlyUnassigned} onClick={() => setOnlyUnassigned(value => !value)}>Лише непризначені</button>
+      <button type="button" className={`${styles.expandButton} ${styles.filterToggle}`} aria-expanded={filtersOpen} aria-controls="calendar-filters" onClick={() => setFiltersOpen(value => !value)}>Фільтри ({activeFilters})</button>
+      <div id="calendar-filters" className={`${styles.extraFilters} ${filtersOpen ? styles.filtersOpen : ""}`}>
       <select aria-label="Builder filter" value={selectedBuilder} onChange={(event) => setSelectedBuilder(event.target.value)}>{uniqueBuilders.map((name) => <option key={name} value={name}>{name === "All" ? "All Builders" : name}</option>)}</select>
       <select aria-label="Store filter" value={selectedStore} onChange={(event) => setSelectedStore(event.target.value)}>{uniqueStores.map((name) => <option key={name} value={name}>{name === "All" ? "All Stores" : name}</option>)}</select>
       <select aria-label="Status filter" value={selectedStatus} onChange={(event) => setSelectedStatus(event.target.value)}>{uniqueStatuses.map((name) => <option key={name} value={name}>{name === "All" ? "All Statuses" : name}</option>)}</select>
+      </div>
       <div className={styles.projectTabs}>
         <button type="button" aria-pressed={projectTab === "Address"} onClick={() => setProjectTab("Address")}><FaBuilding /> Адреси ({loading ? "…" : addressCount})</button>
         <button type="button" aria-pressed={projectTab === "Service"} onClick={() => setProjectTab("Service")}><FaWrench /> Сервіси ({loading ? "…" : serviceCount})</button>
       </div>
-    </div>
-    <div className={styles.overview}>
-      <p role="status">{loading ? "Loading schedule…" : loadError ? "Schedule unavailable" : <>
-        <strong>{summary.total}</strong> {viewMode === "week" ? "робіт за тиждень" : "робіт за день"}
-        <span className={styles.summaryDivider}>·</span><strong>{summary.unassigned}</strong> непризначених
-        <small>За поточними фільтрами · кількість проєктів</small>
-      </>}</p>
       <button type="button" className={styles.expandButton} disabled={loading || loadError} aria-expanded={allExpanded}
         onClick={() => setExpandedDays(Object.fromEntries(datesToRender.map((key) => [key, !allExpanded])))}>
         {allExpanded ? "Згорнути всі дні" : "Розгорнути всі дні"}
       </button>
     </div>
+    </div>
     {loading ? <p className={styles.loadingText}>Loading schedule...</p> : loadError ? <div role="alert" className={styles.empty}>Не вдалося завантажити календар. <button type="button" onClick={fetchEvents}>Спробувати ще раз</button></div> :
-      <div className={styles.weekRows}>{datesToRender.map((key) => <CalendarDay key={key} dateKey={key}
+      <div className={`${styles.weekRows} ${viewMode === "day" ? styles.dayView : ""}`}>{datesToRender.map((key) => <CalendarDay key={key} dateKey={key} weekView={viewMode === "week"}
         events={filteredEvents.filter((event) => event.date === key)} today={key === todayKey}
         expanded={!!expandedDays[key]} onToggle={() => setExpandedDays((old) => ({ ...old, [key]: !old[key] }))} />)}</div>}
   </section>;
 };
 
-function CalendarDay({ dateKey, events, today, expanded, onToggle }) {
+function CalendarDay({ dateKey, events, today, expanded, onToggle, weekView }) {
   const grid = useRef(null);
   const [columns, setColumns] = useState(1);
   useEffect(() => {
@@ -335,34 +355,39 @@ function CalendarDay({ dateKey, events, today, expanded, onToggle }) {
     measure();
     return () => observer.disconnect();
   }, []);
-  const visible = expanded ? events : events.slice(0, columns);
+  const visibleLimit = weekView ? 4 : columns;
+  const visible = expanded ? events : events.slice(0, visibleLimit);
   const date = calendarDate(dateKey);
   return <section className={`${styles.dayRow} ${today ? styles.today : ""}`} aria-label={format(date, "EEEE, MMM d, yyyy")}>
     <header className={styles.dayLabel}>
       <h2>{format(date, "EEE d")}</h2><time dateTime={dateKey}>{format(date, "MMM d, yyyy")}</time>
-      <span>{events.length} робіт</span>{today && <small>Сьогодні</small>}
+      <span>{events.length} проєктів · {calendarSummary(events).unassigned} непризначених</span>{today && <small>Сьогодні</small>}
     </header>
     <div className={styles.dayBody}>
       <div ref={grid} id={`calendar-${dateKey}`} className={styles.cardsGrid}>
         {visible.map((event) => {
           const workers = calendarWorkers(event);
-          const status = event.status === "Ready" ? "Готово" : event.status === "Not Finished" ? "Не завершено" : "В процесі";
-          return <Link key={event.id} to={`/address/${event.id}`} className={`${styles.card} ${event.status === "Ready" ? styles.ready : workers.length ? styles.assigned : styles.unassigned}`}>
-            <strong className={styles.cardAddress}>{event.address || "Unknown address"}</strong>
+          // Only the address/project status marks the whole card complete.
+          const ready = ["Ready", "Completed"].includes(event.status);
+          const address = calendarAddress(event.address);
+          const status = ready ? "Завершено" : event.status === "Not Finished" ? "Не завершено" : "В процесі";
+          return <Link key={event.id} title={event.address} to={`/address/${event.id}`} className={`${styles.card} ${ready ? styles.ready : event.status === "In Process" ? styles.inProgress : ""}`}>
+            <strong className={styles.cardAddress}>{address.street}</strong>
+            {address.city && <span className={styles.city}>{address.city}</span>}
             <span className={styles.cardMeta}>WO #{event.work_order_number || "N/A"} · {event.builders?.name || "Unknown Builder"}</span>
             <span className={styles.store}>{event.stores?.name || "Unknown Store"}{event.project_type === "Service" && ` · Service${event.service_time ? ` · ${event.service_time}` : ""}`}</span>
             {event.project_type === "Service" && event.notes && <span className={styles.notes}>{event.notes}</span>}
             <span className={styles.cardFooter}>
-              <span className={styles.workers}>{workers.length ? workers.map((name, index) => <span key={index} className={styles.worker}>{name}</span>)
-                : event.status !== "Ready" && <span className={styles.unassignedLabel}>Непризначено</span>}</span>
-              <span title={event.status} className={`${styles.status} ${event.status === "Ready" ? styles.statusReady : event.status === "Not Finished" ? styles.statusUnfinished : styles.statusProgress}`}>{status}</span>
+              <span className={styles.workers}>{workers.length ? workers.map((name, index) => <span key={index} className={styles.worker}><FaUser aria-hidden="true" /> {name}</span>)
+                : calendarUnassigned(event) && <span className={styles.unassignedLabel}>Непризначено</span>}</span>
+              <span title={event.status} className={`${styles.status} ${ready ? styles.statusReady : event.status === "Not Finished" ? styles.statusUnfinished : styles.statusProgress}`}>{ready && <FaCheck aria-hidden="true" />} {status}</span>
             </span>
           </Link>;
         })}
       </div>
-      {!events.length && <p className={styles.empty}>Немає робіт за поточними фільтрами.</p>}
-      {events.length > columns && <button type="button" className={styles.moreButton} aria-expanded={expanded} aria-controls={`calendar-${dateKey}`} onClick={onToggle}>
-        {expanded ? "Згорнути" : `Ще ${events.length - visible.length}`}
+      {!events.length && <p className={styles.empty}>Немає проєктів за поточними фільтрами.</p>}
+      {events.length > visibleLimit && <button type="button" className={styles.moreButton} aria-expanded={expanded} aria-controls={`calendar-${dateKey}`} onClick={onToggle}>
+        {expanded ? "Згорнути" : `Ще ${events.length - visible.length} · показати всі ${events.length}`}
       </button>}
     </div>
   </section>;
