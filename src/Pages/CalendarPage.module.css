@@ -1,8 +1,9 @@
 /* Shell changes apply only while Calendar is mounted; AssignedWorkers is intact. */
 :global(div):has(> :global(main) .calendarContainer) { max-width: none; }
-:global(div):has(> :global(main) .calendarContainer) > :global(header) { margin-inline: 0; padding-inline: clamp(12px, 2vw, 32px); }
+:global(div):has(> :global(main) .calendarContainer) > :global(header) { margin-inline: 0; margin-bottom: 4px; padding-inline: clamp(12px, 2vw, 32px); }
+:global(main) > :global(div):has(.calendarContainer) { padding-top: 0; }
 :global(main):has(.calendarContainer) { padding-inline: clamp(12px, 2vw, 32px); }
-.calendarContainer { width: 100%; max-width: 100%; min-width: 0; padding-bottom: 32px; color: var(--color-text-primary); }
+.calendarContainer { width: 100%; max-width: 100%; min-width: 0; padding-bottom: 8px; color: var(--color-text-primary); }
 .stickyControls { position: sticky; top: var(--calendar-header-height, 0px); z-index: 20; background: var(--color-background); padding-block: 8px; }
 .extraFilters { display: flex; flex: 3 1 440px; flex-wrap: wrap; gap: 10px; min-width: 0; }
 .filterToggle { display: none; }
@@ -20,6 +21,10 @@
 .calendarContainer button:disabled { opacity: .55; cursor: wait; }
 .calendarContainer button:focus-visible, .calendarContainer input:focus-visible, .calendarContainer select:focus-visible, .card:focus-visible { outline: 3px solid #b89450; outline-offset: 3px; }
 .filterBar { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+.navbar .filterBar { order: 1; flex: 1 1 520px; min-width: 0; margin: 0; align-items: center; }
+.navbar .summaryBadges { order: 2; }
+.navbar .viewControls { order: 3; }
+.navbar .searchContainer { color: var(--color-text-primary); flex: 1 1 180px; }
 .searchContainer { display: flex; align-items: center; gap: 10px; flex: 2 1 280px; padding-inline: 12px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 7px; min-width: 0; }
 .searchContainer svg { flex-shrink: 0; color: var(--color-text-secondary); }
 .searchContainer input { width: 100%; min-width: 0; min-height: 44px; border: 0; background: transparent; color: inherit; font: inherit; font-size: .88rem; }
@@ -41,12 +46,16 @@
 .cardsGrid { display: grid; grid-auto-flow: column; grid-auto-columns: min(100%, 260px); gap: 8px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; padding: 3px 3px 10px; scrollbar-width: thin; scrollbar-color: #b89450 transparent; }
 .cardsGrid:focus-visible { outline: 2px solid #b89450; outline-offset: -2px; }
 .cardsGrid .card { scroll-snap-align: start; }
-.scrollControls { display: flex; align-items: center; justify-content: space-between; gap: 4px; width: 100%; margin-top: auto; padding-top: 8px; }
-.scrollControls button { display: inline-flex; align-items: center; justify-content: center; width: 38px; min-height: 44px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface); color: var(--color-text-primary); cursor: pointer; flex-shrink: 0; }
-.scrollControls span { font-size: .75rem; font-variant-numeric: tabular-nums; }
+.scrollControls { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; margin-top: auto; padding-top: 8px; }
+.scrollControls button { display: inline-flex; align-items: center; justify-content: center; width: 38px; min-height: 38px; border: 1px solid var(--color-border); border-radius: 9px; background: var(--color-surface); color: var(--color-text-primary); cursor: pointer; flex-shrink: 0; box-shadow: 0 1px 3px #0000000d; transition: background-color .15s, border-color .15s, box-shadow .15s; }
+.scrollControls button:hover:not(:disabled) { background: #f4e6c7; border-color: #b89450; color: #49350f; box-shadow: 0 2px 5px #00000014; }
+.scrollControls button:active:not(:disabled) { background: #e6ca90; }
+.scrollControls span { font-size: .78rem; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .02em; padding: 4px 8px; border-radius: 12px; background: var(--color-background); color: var(--color-text-secondary); }
+.today .scrollControls span { background: #ffffff55; color: #49350f; }
 .scrollControls button:disabled { cursor: default; opacity: .35; }
 .card { min-width: 0; padding: 12px; border: 1px solid var(--color-border); border-left: 4px solid #d2a340; border-radius: 8px; background: var(--color-surface); color: var(--color-text-primary); text-decoration: none; display: flex; flex-direction: column; gap: 5px; transition: box-shadow .15s, border-color .15s; }
-.card:hover { box-shadow: var(--shadow-md, 0 3px 12px #0002); border-color: #b89450; }
+.card { border-radius: 11px; box-shadow: 0 2px 5px #00000008; }
+.card:hover { box-shadow: 0 3px 10px #00000016; border-color: #b89450; }
 .ready { background: #f0f8f2; border-left-color: #43a563; }
 .inProgress { background: #f4f8fd; }
 :global([data-theme="dark"]) .inProgress { background: #1b2430; }
@@ -77,10 +86,41 @@
 .customCalendar :global(.react-datepicker__day--outside-month) { opacity: .5; }
 .customCalendar :global(.react-datepicker__day--selected), .customCalendar :global(.react-datepicker__day--keyboard-selected) { background: #d9b469; color: #24211a; }
 .customCalendar :global(.react-datepicker__day:hover) { background: #d9b469; color: #24211a; }
+/* Wider, two-part cards trade horizontal space for height without hiding fields. */
+@media (min-width: 1101px) {
+  .stickyControls { padding-block: 3px; }
+  .navbar { padding: 6px 8px; gap: 6px 10px; }
+  .navGroup, .viewControls { gap: 5px; }
+  .textBtn, .datePickerBtn { font-size: .78rem; padding: 5px 8px; }
+  .filterBar { margin: 5px 0; gap: 6px; }
+  .searchContainer { flex-basis: 220px; }
+  .extraFilters { flex-basis: 360px; gap: 6px; }
+  .projectTabs button, .expandButton { font-size: .78rem; padding: 5px 8px; }
+  .weekRows { gap: 7px; }
+  .fillWeek { min-height: max(0px, calc(100dvh - var(--calendar-content-top, 160px) - 10px)); }
+  .fillWeek > .dayRow { flex: 1 0 auto; }
+  .dayRow { grid-template-columns: 220px minmax(0, 1fr); }
+  .dayLabel { padding: 8px 10px; min-height: 112px; gap: 4px; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto auto 1fr; }
+  .dayLabel h2 { font-size: 1rem; }
+  .dayLabel time { font-size: .75rem; align-self: center; }
+  .dayLabel > span { grid-column: 1 / -1; font-size: .8rem; }
+  .dayLabel small { grid-column: 1 / -1; font-size: .7rem; }
+  .scrollControls { grid-column: 1 / -1; grid-row: 4; align-self: end; padding-top: 6px; }
+  .scrollControls button { min-height: 38px; width: 38px; }
+  .dayBody { padding: 5px 7px; display: grid; }
+  .cardsGrid { grid-auto-columns: min(100%, 460px); gap: 8px; padding: 2px 2px 5px; }
+  .card { display: grid; grid-template-columns: minmax(0, 1fr) 130px; column-gap: 12px; row-gap: 3px; align-content: center; padding: 9px 10px; min-height: 104px; }
+  .cardAddress, .city, .cardMeta, .store, .notes { grid-column: 1; }
+  .cardAddress { font-size: 1rem; line-height: 1.3; }
+  .city, .cardMeta, .store, .notes { font-size: .82rem; line-height: 1.3; }
+  .cardFooter { grid-column: 2; grid-row: 1 / span 5; margin: 0; padding: 4px 0 4px 10px; border-left: 1px solid var(--color-border); flex-direction: column; align-items: flex-start; justify-content: center; gap: 8px; }
+  .worker, .unassignedLabel, .status { padding: 4px 7px; font-size: .76rem; }
+  .empty { padding: 10px; font-size: .78rem; }
+}
 @media (max-width: 767px) {
   .dayRow { grid-template-columns: 1fr; }
   .dayLabel { min-height: 0; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
-  .scrollControls { width: auto; margin-left: auto; padding-top: 0; }
+  .scrollControls { width: 100%; margin-left: 0; padding-top: 6px; }
   .navGroup { width: 100%; }
   .navGroup :global(.react-datepicker-wrapper) { flex: 1; min-width: 0; }
   .datePickerBtn { width: 100%; font-size: .75rem; padding: 8px; }
@@ -96,4 +136,19 @@
   .extraFilters { display: none; flex-basis: 100%; }
   .extraFilters.filtersOpen { display: flex; }
   .extraFilters.filtersOpen { max-height: 30dvh; overflow-y: auto; }
+}
+@media (min-width: 1101px) {
+  .navbar { justify-content: flex-start; }
+  .navbar .navGroup, .navbar .viewControls { flex-shrink: 0; }
+  .navbar .filterBar { flex-wrap: nowrap; }
+  .navbar .extraFilters { flex: 1 1 360px; }
+  .navbar .extraFilters > select { flex-basis: 110px; }
+  .navbar .projectTabs { flex-wrap: nowrap; flex-shrink: 0; }
+  .navbar .expandButton { white-space: nowrap; }
+}
+@media (min-width: 1101px) and (max-width: 2199px) {
+  .navbar .filterBar { position: relative; }
+  .navbar .filterToggle { display: inline-flex; align-items: center; }
+  .navbar .extraFilters { display: none; }
+  .navbar .extraFilters.filtersOpen { display: flex; position: absolute; top: calc(100% + 8px); left: 0; right: 0; padding: 12px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; box-shadow: var(--shadow-md); z-index: 2; }
 }

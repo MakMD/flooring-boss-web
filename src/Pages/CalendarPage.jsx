@@ -86,9 +86,17 @@ const CalendarPage = () => {
   useEffect(() => {
     const header = document.querySelector("main")?.previousElementSibling;
     if (!header) return;
-    const measure = () => container.current?.style.setProperty("--calendar-header-height", `${header.getBoundingClientRect().height}px`);
+    const toolbar = container.current?.firstElementChild;
+    const measure = () => {
+      container.current?.style.setProperty("--calendar-header-height", `${header.getBoundingClientRect().height}px`);
+      if (container.current && toolbar) {
+        const top = container.current.getBoundingClientRect().top + window.scrollY + toolbar.getBoundingClientRect().height;
+        container.current.style.setProperty("--calendar-content-top", `${top}px`);
+      }
+    };
     const observer = new ResizeObserver(measure);
     observer.observe(header);
+    if (toolbar) observer.observe(toolbar);
     measure();
     return () => observer.disconnect();
   }, []);
@@ -317,7 +325,6 @@ const CalendarPage = () => {
         <button type="button" aria-pressed={viewMode === "day"} onClick={() => setViewMode("day")} className={styles.textBtn}><FaRegCalendar /> День</button>
         <button type="button" aria-pressed={viewMode === "week"} onClick={() => setViewMode("week")} className={styles.textBtn}><FaRegCalendarAlt /> Тиждень</button>
       </div>
-    </div>
     <div className={styles.filterBar}>
       <label className={styles.searchContainer}><FaSearch /><input aria-label="Search address, builder or WO" placeholder="Шукати адресу, клієнта або WO..." value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} /></label>
       <button type="button" className={styles.expandButton} aria-pressed={onlyUnassigned} onClick={() => setOnlyUnassigned(value => !value)}>Лише непризначені</button>
@@ -333,8 +340,9 @@ const CalendarPage = () => {
       </div>
     </div>
     </div>
+    </div>
     {loading ? <p className={styles.loadingText}>Loading schedule...</p> : loadError ? <div role="alert" className={styles.empty}>Не вдалося завантажити календар. <button type="button" onClick={fetchEvents}>Спробувати ще раз</button></div> :
-      <div className={styles.weekRows}>{datesToRender.map((key) => <CalendarDay key={key} dateKey={key}
+      <div className={`${styles.weekRows} ${viewMode === "week" ? styles.fillWeek : ""}`}>{datesToRender.map((key) => <CalendarDay key={key} dateKey={key}
         events={filteredEvents.filter((event) => event.date === key)} today={key === todayKey} />)}</div>}
   </section>;
 };
