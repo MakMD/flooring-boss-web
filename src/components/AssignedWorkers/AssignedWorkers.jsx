@@ -40,7 +40,7 @@ export default function AssignedWorkers({ children, defaultOpen = false, pathnam
             "id, date, status, person_id, people(name), work_type_templates(name), addresses!inner(id, address, date, status, is_deleted)",
           )
           .not("person_id", "is", null);
-        query = calendarDrawer ? query.gte("addresses.date", start).lte("addresses.date", end)
+        query = calendarDrawer ? query.gte("date", start).lte("date", end)
           : query.or(`and(date.gte.${today},date.lte.${tomorrow}),date.is.null`);
         const { data, error: fetchError } = await query
           .or("status.is.null,status.neq.Ready")
@@ -128,7 +128,7 @@ export default function AssignedWorkers({ children, defaultOpen = false, pathnam
   const activeTasks = calendarDrawer ? calendarAssignments(tasks, start, end) : activeAssignments(tasks);
   const periodLabel = start ? (start === end ? start : `${start} – ${end}`) : "…";
   const groups = calendarDrawer
-    ? [...new Set(activeTasks.map(task => task.addresses.date))].map(date => ({ date, label: date }))
+    ? [...new Set(activeTasks.map(task => task.date))].map(date => ({ date, label: date }))
     : [{ date: today, label: "Today" }, { date: tomorrow, label: "Tomorrow" }];
   const content = loading ? (
     <p className={styles.message} role="status">Loading assignments…</p>
@@ -142,7 +142,7 @@ export default function AssignedWorkers({ children, defaultOpen = false, pathnam
   ) : (
     <div className={styles.groups}>
       {groups.map(({ date, label }) => {
-        const dayTasks = activeTasks.filter((task) => (calendarDrawer ? task.addresses.date : task.date || task.addresses.date) === date);
+        const dayTasks = activeTasks.filter((task) => (calendarDrawer ? task.date : task.date || task.addresses.date) === date);
         if (!dayTasks.length) return null;
         return (
           <section key={date} aria-label={`${label} assignments`}>
@@ -189,8 +189,8 @@ export default function AssignedWorkers({ children, defaultOpen = false, pathnam
             if (!inlinePanel || !expanded) refresh();
           }}>
           <FaUsers aria-hidden="true" />
-          <span>Assigned workers</span>
-          {!loading && !error && <span className={styles.count}>{activeTasks.length} {calendarDrawer ? "активних призначень" : activeTasks.length === 1 ? "job" : "jobs"}</span>}
+          <span>{calendarDrawer ? "Виконавці" : "Assigned workers"}</span>
+          {!loading && !error && <span title={calendarDrawer ? "Активні призначення" : undefined} aria-label={calendarDrawer ? `${activeTasks.length} активних призначень` : undefined} className={styles.count}>{activeTasks.length} {calendarDrawer ? "" : activeTasks.length === 1 ? "job" : "jobs"}</span>}
           {inlinePanel && (expanded ? <FaChevronLeft aria-hidden="true" /> : <FaChevronRight aria-hidden="true" />)}
         </button>;
 
@@ -239,7 +239,7 @@ export default function AssignedWorkers({ children, defaultOpen = false, pathnam
           <button ref={closeButton} autoFocus className={styles.iconButton} aria-label="Close assigned workers"
             onClick={() => dialog.current.close()}><FaTimes aria-hidden="true" /></button>
         </div>
-        <p className={styles.caption}>{calendarDrawer ? `${periodLabel} · Calgary · за датою ворк-ордера` : "Today & tomorrow · Calgary time"}</p>
+        <p className={styles.caption}>{calendarDrawer ? `${periodLabel} · Calgary · за датою роботи` : "Today & tomorrow · Calgary time"}</p>
         {content}
       </dialog>}
     </div>

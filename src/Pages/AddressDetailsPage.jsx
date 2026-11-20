@@ -30,12 +30,9 @@ import WorkTypesManager from "../components/WorkTypesManager/WorkTypesManager";
 import { StorageImage, StorageLink } from "../components/StorageMedia";
 import { resolveStorageUrl } from "../utils/storageUrl";
 import MaterialsManager from "../components/MaterialsManager/MaterialsManager";
+import { fileName as displayFileName, isImageFile } from "../utils/filePresentation.js";
 
-const isImage = (url) => {
-  if (!url) return false;
-  const cleanUrl = url.split("?")[0];
-  return cleanUrl.match(/\.(jpeg|jpg|gif|png|webp|bmp)$/i) != null;
-};
+const isImage = isImageFile;
 
 const getStatusStyle = (status) => {
   if (status === "Ready")
@@ -60,28 +57,41 @@ const FileListItem = ({
     }
   };
 
-  const fileName = fileIdentifier.split("/").pop().split("?")[0];
+  const fileName = displayFileName(fileIdentifier);
 
   return (
-    <li className={styles.fileItem}>
+    <li className={styles.mediaItem}>
+      <div className={styles.mediaPreview}>
+        {isImage(fileIdentifier) ? <StorageImage
+          bucket={bucketName} src={fileIdentifier} alt={fileName}
+          className={styles.mediaThumbnail} loading="lazy" role="button" tabIndex={0}
+          aria-label={`Відкрити фото ${fileName}`} onClick={handleLinkClick}
+          onKeyDown={(event) => { if (["Enter", " "].includes(event.key)) handleLinkClick(event); }}
+        /> : <StorageLink bucket={bucketName} href={fileIdentifier} target="_blank" rel="noopener noreferrer" className={styles.documentPreview} aria-label={`Відкрити файл ${fileName}`}>
+          {/\.pdf$/i.test(fileName) ? <FaFilePdf /> : <FaFileAlt />}
+          <span>{/\.pdf$/i.test(fileName) ? "PDF" : "Документ"}</span>
+        </StorageLink>}
+      </div>
+      <div className={styles.mediaCaption}>
       <StorageLink
         bucket={bucketName}
         href={fileIdentifier}
         target="_blank"
         rel="noopener noreferrer"
-        className={styles.fileLink}
+        className={styles.mediaName}
         onClick={handleLinkClick}
       >
-        <FaFileAlt />
         {fileName}
       </StorageLink>
       <div style={{ display: "flex", gap: "8px" }}>
         <button
           onClick={() => onDelete(fileIdentifier)}
           className={commonStyles.buttonIcon}
+          aria-label={`Видалити ${fileName}`}
         >
           <FaTrash />
         </button>
+      </div>
       </div>
     </li>
   );
@@ -1135,7 +1145,7 @@ const AddressDetailsPage = () => {
                   onUploadSuccess={handleFileUploaded}
                 />
                 {standardFiles.length > 0 ? (
-                  <ul className={styles.fileList}>
+                  <ul className={styles.mediaGrid}>
                     {standardFiles.map((id) => (
                       <FileListItem
                         key={id}

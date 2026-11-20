@@ -31,6 +31,7 @@ import {
 } from "date-fns";
 import { Formik, Form, Field, ErrorMessage } from "formik";
 import * as Yup from "yup";
+import { pickupFieldsForCreate } from "../utils/servicePickup.js";
 
 const PAGE_SIZE = 40;
 
@@ -339,6 +340,14 @@ const AddressListPage = () => {
   }, [addresses]);
 
   const saveProjectToDatabase = async (values, setSubmitting, resetForm) => {
+    let pickupFields;
+    try {
+      pickupFields = await pickupFieldsForCreate(supabase, values);
+    } catch (error) {
+      toast.error(error.message || "Не вдалося перевірити позначку матеріалів. Спробуйте ще раз.");
+      setSubmitting(false);
+      return;
+    }
     const combinedFiles = [
       ...(values.scanned_files_array || []),
       ...(values.additional_photo_url ? [values.additional_photo_url] : []),
@@ -348,6 +357,7 @@ const AddressListPage = () => {
       values.project_type === "Service" ? "Service" : "Address";
 
     const newAddressObject = {
+      ...pickupFields,
       work_order_number: values.work_order_number?.trim() || null,
       address: values.address.trim(),
       date: values.date,
@@ -1022,6 +1032,7 @@ const AddressListPage = () => {
                 address: "",
                 date: "",
                 time: "",
+                material_pickup_required: false,
                 total_amount: "",
                 ai_translation: "",
                 original_photo_url: "",
@@ -1136,6 +1147,11 @@ const AddressListPage = () => {
                       />
                     </div>
                   </div>
+
+                  {values.project_type === "Service" && <label className={styles.pickupOption}>
+                    <Field type="checkbox" name="material_pickup_required" />
+                    <span><strong>Забрати матеріал</strong><small>Для цього сервісу потрібно забрати матеріал перед виїздом.</small></span>
+                  </label>}
 
                   <div
                     className={styles.inputGroup}

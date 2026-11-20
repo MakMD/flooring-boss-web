@@ -1,6 +1,10 @@
 // src/Pages/CalendarPage.jsx
 import { useState, useEffect, useMemo, useCallback, useRef, useContext } from "react";
 import { AssignedWorkersContext } from "../components/AssignedWorkers/AssignedWorkersContext";
+import { needsMaterialPickup } from "../utils/servicePickup.js";
+import CalendarPreview from "../components/CalendarPreview.jsx";
+import { calendarWorkSummary, calendarProjectStatus } from "../utils/calendarWork.js";
+import { uk } from "date-fns/locale";
 import { Link } from "react-router-dom";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
@@ -22,6 +26,7 @@ import {
   FaRegCalendarAlt,
   FaRegCalendar,
   FaSearch,
+  FaEye,
   FaBuilding,
   FaWrench,
   FaUser,
@@ -81,6 +86,10 @@ const CalendarPage = () => {
   const [selectedStatus, setSelectedStatus] = useState("All");
   const [onlyUnassigned, setOnlyUnassigned] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInput = useRef(null);
+  const searchToggle = useRef(null);
+  useEffect(() => { if (searchOpen) searchInput.current?.focus(); }, [searchOpen]);
   const container = useRef(null);
 
   useEffect(() => {
@@ -140,7 +149,7 @@ const CalendarPage = () => {
     try {
     const { data, error } = await supabase
       .from("addresses")
-      .select("*, builders(name), stores(name), work_types(person_id, people(name))")
+      .select("*, builders(name), stores(name), work_types(id, date, status, person_id, people(name), work_type_templates(name))")
       .eq("is_deleted", false)
       .gte("date", startDate)
       .lte("date", endDate)
@@ -297,8 +306,10 @@ const CalendarPage = () => {
     setCalendarMonth(today);
     setViewMode("week");
   };
-  const headerText = viewMode === "day" ? format(selectedDate, "MMM d, yyyy")
-    : `${format(calendarDate(datesToRender[0]), "MMM d, yyyy")} – ${format(calendarDate(datesToRender[6]), "MMM d, yyyy")}`;
+  const firstDay = calendarDate(datesToRender[0]);
+  const lastDay = calendarDate(datesToRender.at(-1));
+  const headerText = viewMode === "day" ? format(selectedDate, "d MMMM yyyy", { locale: uk })
+    : `${format(firstDay, format(firstDay, "yyyy-MM") === format(lastDay, "yyyy-MM") ? "d" : "d MMMM", { locale: uk })}–${format(lastDay, "d MMMM yyyy", { locale: uk })}`;
 
   const activeFilters = [selectedBuilder, selectedStore, selectedStatus].filter(value => value !== "All").length;
   return <section ref={container} className={styles.calendarContainer} aria-label="Calendar">
@@ -311,24 +322,26 @@ const CalendarPage = () => {
           customInput={<button type="button" className={styles.datePickerBtn}>{headerText}<FaRegCalendarAlt /></button>}
           renderDayContents={renderDayContents} calendarClassName={styles.customCalendar} />
         <button type="button" onClick={handleNext} className={styles.iconBtn} aria-label={viewMode === "week" ? "Next week" : "Next day"}><FaChevronRight /></button>
+      </div><div className={styles.dateExtras}>
         <button type="button" className={styles.textBtn} onClick={goToCurrentWeek}>Поточний тиждень</button>
         <button type="button" onClick={fetchEvents} disabled={loading} className={styles.iconBtn} aria-label="Refresh calendar"><FaSyncAlt /></button>
       </div>
       <div className={styles.summaryBadges} role="status" title="Кількість проєктів за поточними фільтрами">
         {loading ? "Завантаження…" : loadError ? "Календар недоступний" : <>
-          <span>{summary.total} проєктів · {viewMode === "week" ? "тиждень" : "день"}</span>
+          <span>{summary.total} проєктів</span>
           <span className={styles.summaryUnassigned}>{summary.unassigned} непризначених</span>
         </>}
       </div>
       <div className={styles.viewControls}>
-        {assignedWorkersButton}
         <button type="button" aria-pressed={viewMode === "day"} onClick={() => setViewMode("day")} className={styles.textBtn}><FaRegCalendar /> День</button>
         <button type="button" aria-pressed={viewMode === "week"} onClick={() => setViewMode("week")} className={styles.textBtn}><FaRegCalendarAlt /> Тиждень</button>
       </div>
-    <div className={styles.filterBar}>
-      <label className={styles.searchContainer}><FaSearch /><input aria-label="Search address, builder or WO" placeholder="Шукати адресу, клієнта або WO..." value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} /></label>
+    <div className={`${styles.filterBar} ${filtersOpen ? styles.mobileFiltersOpen : ""}`}>
+      <button ref={searchToggle} type="button" className={styles.searchToggle} aria-label="Пошук" aria-expanded={searchOpen} aria-controls="calendar-search" onClick={() => { setSearchOpen(value => !value); setFiltersOpen(false); }}><FaSearch /><span>Пошук</span>{searchQuery && <span title={searchQuery} aria-label={`Пошук застосовано: ${searchQuery}`} className={styles.searchActive}>●</span>}</button>
+      <label id="calendar-search" className={`${styles.searchContainer} ${searchOpen ? styles.searchOpen : ""}`}><FaSearch /><input ref={searchInput} onKeyDown={(event) => { if (event.key === "Escape") { setSearchOpen(false); searchToggle.current?.focus(); } }} aria-label="Search address, builder or WO" placeholder="Шукати адресу, клієнта або WO..." value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} /></label>
       <button type="button" className={styles.expandButton} aria-pressed={onlyUnassigned} onClick={() => setOnlyUnassigned(value => !value)}>Лише непризначені</button>
-      <button type="button" className={`${styles.expandButton} ${styles.filterToggle}`} aria-expanded={filtersOpen} aria-controls="calendar-filters" onClick={() => setFiltersOpen(value => !value)}>Фільтри ({activeFilters})</button>
+      <button type="button" className={`${styles.expandButton} ${styles.filterToggle}`} aria-expanded={filtersOpen} aria-controls="calendar-filters" onClick={() => { setFiltersOpen(value => !value); setSearchOpen(false); }}>Фільтри ({activeFilters})</button>
+      <div className={styles.workersControl}>{assignedWorkersButton}</div>
       <div id="calendar-filters" className={`${styles.extraFilters} ${filtersOpen ? styles.filtersOpen : ""}`}>
       <select aria-label="Builder filter" value={selectedBuilder} onChange={(event) => setSelectedBuilder(event.target.value)}>{uniqueBuilders.map((name) => <option key={name} value={name}>{name === "All" ? "All Builders" : name}</option>)}</select>
       <select aria-label="Store filter" value={selectedStore} onChange={(event) => setSelectedStore(event.target.value)}>{uniqueStores.map((name) => <option key={name} value={name}>{name === "All" ? "All Stores" : name}</option>)}</select>
@@ -347,18 +360,24 @@ const CalendarPage = () => {
   </section>;
 };
 
+const MOBILE_CAROUSEL = "(max-width: 767px)";
+
 function CalendarDay({ dateKey, events, today }) {
   const grid = useRef(null);
-  const [position, setPosition] = useState({ first: 0, last: 0, back: false, next: false });
+  const [preview, setPreview] = useState(null);
+  const [position, setPosition] = useState({ first: 0, last: 0, current: 1, back: false, next: false });
   const eventIds = events.map(event => event.id).join(",");
   useEffect(() => {
     const element = grid.current;
     const measure = () => {
+      const mobile = window.matchMedia(MOBILE_CAROUSEL).matches;
+      const current = mobile ? Math.round(element.scrollLeft / Math.max(1, element.clientWidth)) + 1 : 1;
       const bounds = element.getBoundingClientRect();
       const visible = [...element.children].map((child, index) => ({ bounds: child.getBoundingClientRect(), index }))
         .filter(child => child.bounds.right > bounds.left + 2 && child.bounds.left < bounds.right - 2);
       setPosition({ first: visible.length ? visible[0].index + 1 : 0,
         last: visible.length ? visible.at(-1).index + 1 : 0,
+        current,
         back: element.scrollLeft > 4,
         next: element.scrollLeft + element.clientWidth < element.scrollWidth - 4 });
     };
@@ -371,22 +390,29 @@ function CalendarDay({ dateKey, events, today }) {
   }, [eventIds]);
   const scrollCards = (direction) => {
     const element = grid.current;
-    element.scrollBy({ left: direction * element.clientWidth,
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth";
+    if (window.matchMedia(MOBILE_CAROUSEL).matches) {
+      const current = Math.round(element.scrollLeft / element.clientWidth);
+      const target = Math.max(0, Math.min(element.children.length - 1, current + direction));
+      element.scrollTo({ left: target * element.clientWidth, behavior });
+      return;
+    }
+    element.scrollBy({ left: direction * element.clientWidth, behavior });
   };
   const date = calendarDate(dateKey);
   return <section className={`${styles.dayRow} ${today ? styles.today : ""}`} aria-label={format(date, "EEEE, MMM d, yyyy")}>
     <header className={styles.dayLabel}>
-      <h2>{format(date, "EEE d")}</h2><time dateTime={dateKey}>{format(date, "MMM d, yyyy")}</time>
+      <h2><time dateTime={dateKey}>{format(date, "EEEEEE, d", { locale: uk })}</time></h2>
       <span>{events.length} проєктів · {calendarSummary(events).unassigned} непризначених</span>{today && <small>Сьогодні</small>}
-      {events.length > 0 && <div className={styles.scrollControls}>
+      {events.length > 0 && <div className={`${styles.scrollControls} ${!position.back && !position.next ? styles.allVisible : ""}`}>
         <button type="button" aria-label={`Попередні проєкти ${dateKey}`} aria-controls={`calendar-${dateKey}`} disabled={!position.back} onClick={() => scrollCards(-1)}><FaChevronLeft /></button>
-        <span aria-live="polite" aria-atomic="true">{position.first}–{position.last} / {events.length}</span>
+        <span className={styles.desktopCardRange} aria-live="polite" aria-atomic="true">{position.first}–{position.last} / {events.length}</span>
+        <span className={styles.mobileCardPosition} aria-live="polite" aria-atomic="true">{position.current} / {events.length}</span>
         <button type="button" aria-label={`Наступні проєкти ${dateKey}`} aria-controls={`calendar-${dateKey}`} disabled={!position.next} onClick={() => scrollCards(1)}><FaChevronRight /></button>
       </div>}
     </header>
-    <div className={styles.dayBody}>
-      <div ref={grid} id={`calendar-${dateKey}`} className={styles.cardsGrid} tabIndex={events.length ? 0 : undefined}
+    <div className={`${styles.dayBody} ${position.next ? styles.hasMoreCards : ""}`}>
+      <div ref={grid} id={`calendar-${dateKey}`} className={`${styles.cardsGrid} ${!position.back && !position.next ? styles.allVisible : ""}`} tabIndex={events.length ? 0 : undefined}
         role="region" aria-label={`Проєкти ${dateKey}`} onKeyDown={(event) => {
           if (event.target === event.currentTarget && ["ArrowLeft", "ArrowRight"].includes(event.key)) {
             event.preventDefault(); scrollCards(event.key === "ArrowLeft" ? -1 : 1);
@@ -397,21 +423,26 @@ function CalendarDay({ dateKey, events, today }) {
           // Only the address/project status marks the whole card complete.
           const ready = ["Ready", "Completed"].includes(event.status);
           const address = calendarAddress(event.address);
-          const status = ready ? "Завершено" : event.status === "Not Finished" ? "Не завершено" : "В процесі";
-          return <Link key={event.id} title={event.address} to={`/address/${event.id}`} className={`${styles.card} ${ready ? styles.ready : event.status === "In Process" ? styles.inProgress : ""}`}>
+          const status = calendarProjectStatus(event.status);
+          return <article key={event.id} className={`${styles.card} ${ready ? styles.ready : event.status === "In Process" ? styles.inProgress : ""}`}><Link className={styles.cardLink} title={event.address} to={`/address/${event.id}`}>
             <strong className={styles.cardAddress}>{address.street}</strong>
             {address.city && <span className={styles.city}>{address.city}</span>}
             <span className={styles.cardMeta}>WO #{event.work_order_number || "N/A"} · {event.builders?.name || "Unknown Builder"}</span>
             <span className={styles.store}>{event.stores?.name || "Unknown Store"}{event.project_type === "Service" && ` · Service${event.service_time ? ` · ${event.service_time}` : ""}`}</span>
             {event.project_type === "Service" && event.notes && <span className={styles.notes}>{event.notes}</span>}
+            {calendarWorkSummary(event) && <span className={styles.workSummary}>{calendarWorkSummary(event)}</span>}
             <span className={styles.cardFooter}>
+              {needsMaterialPickup(event) && <span className={`${styles.status} ${styles.pickupLabel}`}>Забрати матеріал</span>}
               <span className={styles.workers}>{workers.length ? workers.map((name, index) => <span key={index} className={styles.worker}><FaUser aria-hidden="true" /> {name}</span>)
                 : calendarUnassigned(event) && <span className={styles.unassignedLabel}>Непризначено</span>}</span>
               <span title={event.status} className={`${styles.status} ${ready ? styles.statusReady : event.status === "Not Finished" ? styles.statusUnfinished : styles.statusProgress}`}>{ready && <FaCheck aria-hidden="true" />} {status}</span>
             </span>
-          </Link>;
+          </Link><button type="button" className={styles.previewButton} aria-label="Швидкий перегляд" title="Швидкий перегляд"
+            onClick={e => setPreview({ event, anchor: e.currentTarget })}><FaEye aria-hidden="true" /></button></article>;
         })}
       </div>
+      {position.next && <button type="button" className={styles.edgeNext} aria-label={`Гортати далі ${dateKey}`} onClick={() => scrollCards(1)}><FaChevronRight /></button>}
+      {preview && <CalendarPreview event={preview.event} anchor={preview.anchor} onClose={() => setPreview(null)} />}
       {!events.length && <p className={styles.empty}>Немає проєктів за поточними фільтрами.</p>}
     </div>
   </section>;

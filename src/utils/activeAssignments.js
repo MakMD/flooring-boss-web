@@ -52,14 +52,14 @@ export function activeAssignments(rows, now = new Date()) {
 }
 
 // Calendar dates are YYYY-MM-DD in Calgary, not UTC instants.
-// The calendar drawer follows the work order date, independently of work dates.
+// The calendar drawer follows the work date only; undated work is excluded.
 export function calendarAssignments(rows, start, end) {
   return rows.filter(task => task.person_id != null &&
-    task.addresses?.date && task.addresses.date >= start && task.addresses.date <= end &&
+    task.date && task.date >= start && task.date <= end &&
     !["Ready", "Completed"].includes(task.status) &&
     task.addresses?.is_deleted === false &&
     !["Ready", "Completed"].includes(task.addresses.status))
-    .sort((a, b) => a.addresses.date.localeCompare(b.addresses.date) ||
+    .sort((a, b) => a.date.localeCompare(b.date) ||
       (a.people?.name || "").localeCompare(b.people?.name || "") ||
       String(a.id).localeCompare(String(b.id)));
 }
